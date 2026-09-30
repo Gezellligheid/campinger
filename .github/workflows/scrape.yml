@@ -1,0 +1,34 @@
+name: Scrape campsites
+
+on:
+  schedule:
+    # Nightly, per infrastructure.md §5 (static info; tighten to hourly for
+    # a prices-only job later if/when that's split out).
+    - cron: "17 2 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Run scraper
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+          SCRAPER_CONTACT_URL: ${{ vars.SCRAPER_CONTACT_URL }}
+        run: npm run scrape
+
+      - name: Upload run output
+        uses: actions/upload-artifact@v4
+        with:
+          name: scraper-output
+          path: scraper/output/
+          retention-days: 14

@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+:root {
+  --background: #faf7f1;
+  --foreground: #22301f;
+
+  /* Modern adventure palette */
+  --color-forest-50: #eef4ef;
+  --color-forest-100: #d3e3d5;
+  --color-forest-200: #a8c8ac;
+  --color-forest-300: #7aa982;
+  --color-forest-400: #4f8a5c;
+  --color-forest-500: #2f6b4f;
+  --color-forest-600: #235943;
+  --color-forest-700: #1c4736;
+  --color-forest-800: #16382b;
+  --color-forest-900: #102821;
+
+  --color-terracotta-50: #fdf1ea;
+  --color-terracotta-100: #fad9c3;
+  --color-terracotta-200: #f4b892;
+  --color-terracotta-300: #ea9463;
+  --color-terracotta-400: #dd743e;
+  --color-terracotta-500: #c1592b;
+  --color-terracotta-600: #a24623;
+  --color-terracotta-700: #82371d;
+  --color-terracotta-800: #632918;
+  --color-terracotta-900: #451c10;
+
+  --color-sand-50: #fdfbf6;
+  --color-sand-100: #f8f1e2;
+  --color-sand-200: #f0e4cc;
+  --color-sand-300: #e8d5ac;
+  --color-sand-400: #dcc086;
+  --color-sand-500: #cca75f;
+  --color-sand-600: #b08a45;
+
+  --color-ink-900: #1c2418;
+  --color-ink-700: #34412f;
+  --color-ink-500: #5a6653;
+  --color-ink-300: #8d9586;
+  --color-ink-100: #dfe3da;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-forest-50: var(--color-forest-50);
+  --color-forest-100: var(--color-forest-100);
+  --color-forest-200: var(--color-forest-200);
+  --color-forest-300: var(--color-forest-300);
+  --color-forest-400: var(--color-forest-400);
+  --color-forest-500: var(--color-forest-500);
+  --color-forest-600: var(--color-forest-600);
+  --color-forest-700: var(--color-forest-700);
+  --color-forest-800: var(--color-forest-800);
+  --color-forest-900: var(--color-forest-900);
+
+  --color-terracotta-50: var(--color-terracotta-50);
+  --color-terracotta-100: var(--color-terracotta-100);
+  --color-terracotta-200: var(--color-terracotta-200);
+  --color-terracotta-300: var(--color-terracotta-300);
+  --color-terracotta-400: var(--color-terracotta-400);
+  --color-terracotta-500: var(--color-terracotta-500);
+  --color-terracotta-600: var(--color-terracotta-600);
+  --color-terracotta-700: var(--color-terracotta-700);
+  --color-terracotta-800: var(--color-terracotta-800);
+  --color-terracotta-900: var(--color-terracotta-900);
+
+  --color-sand-50: var(--color-sand-50);
+  --color-sand-100: var(--color-sand-100);
+  --color-sand-200: var(--color-sand-200);
+  --color-sand-300: var(--color-sand-300);
+  --color-sand-400: var(--color-sand-400);
+  --color-sand-500: var(--color-sand-500);
+  --color-sand-600: var(--color-sand-600);
+
+  --color-ink-900: var(--color-ink-900);
+  --color-ink-700: var(--color-ink-700);
+  --color-ink-500: var(--color-ink-500);
+  --color-ink-300: var(--color-ink-300);
+  --color-ink-100: var(--color-ink-100);
+
+  --font-display: var(--font-fraunces);
+  --font-sans: var(--font-jakarta);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-display), ui-serif, Georgia, serif;
+}
+
+/* MapLibre control tweaks to match the brand */
+.maplibregl-popup-content {
+  border-radius: 1rem !important;
+  padding: 0 !important;
+  overflow: hidden;
+  box-shadow: 0 12px 32px -8px rgba(28, 36, 24, 0.35) !important;
+}
+.maplibregl-popup-tip {
+  display: none !important;
+}
+.maplibregl-ctrl-top-right {
+  top: auto !important;
+  bottom: 0.75rem !important;
+  right: 0.75rem !important;
+}
