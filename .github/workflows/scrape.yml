@@ -5,7 +5,12 @@ on:
     # Nightly, per infrastructure.md §5 (static info; tighten to hourly for
     # a prices-only job later if/when that's split out).
     - cron: "17 2 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: "Also run the one-time town_aggregates backfill (see scraper/backfill.ts) — for entries indexed before town aggregation existed. Safe to re-run; skip for routine manual runs."
+        type: boolean
+        default: false
 
 jobs:
   scrape:
@@ -19,6 +24,12 @@ jobs:
           cache: npm
 
       - run: npm ci
+
+      - name: Backfill town aggregates
+        if: ${{ inputs.backfill }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT_KEY: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_KEY }}
+        run: npm run backfill
 
       - name: Run scraper
         env:

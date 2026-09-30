@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "scrape": "tsx scraper/run.ts",
-    "scrape:verify": "tsx scraper/verify.ts"
+    "scrape:verify": "tsx scraper/verify.ts",
+    "backfill": "tsx scraper/backfill.ts"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

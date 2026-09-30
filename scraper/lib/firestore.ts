@@ -266,6 +266,85 @@ export async function markIndexEntriesScraped(ids: string[]): Promise<void> {
   if (opsInBatch > 0) await batch.commit();
 }
 
+/**
+ * One-time backfill for entries indexed *before* town aggregation existed
+ * — ensureTownAggregates only ever processes newly-discovered entries, so
+ * anything already in campsite_index from an earlier run never got
+ * geocoded/aggregated on its own. Recomputes totalCount/scrapedCount from
+ * a fresh count of the FULL index each time (not an increment), so unlike
+ * ensureTownAggregates this is safe to re-run without double-counting.
+ */
+export async function backfillTownAggregates(): Promise<void> {
+  const db = getDb();
+  const snap = await db.collection(INDEX_COLLECTION).get();
+
+  const byTown = new Map<
+    string,
+    { country: string; region: string | null; town: string | null; total: number; scraped: number }
+  >();
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    const slug = townSlug(data.country, data.region ?? null, data.town ?? null);
+    const existing = byTown.get(slug);
+    if (existing) {
+      existing.total++;
+      if (data.scraped === true) existing.scraped++;
+    } else {
+      byTown.set(slug, {
+        country: data.country,
+        region: data.region ?? null,
+        town: data.town ?? null,
+        total: 1,
+        scraped: data.scraped === true ? 1 : 0,
+      });
+    }
+  }
+
+  console.log(`  [backfill] ${byTown.size} distinct town(s) across ${snap.size} indexed entries`);
+  let processed = 0;
+  let geocodedFresh = 0;
+
+  for (const [slug, group] of byTown) {
+    const geocodeRef = db.collection(GEOCODE_CACHE_COLLECTION).doc(slug);
+    let geocodeDoc = await geocodeRef.get();
+
+    if (!geocodeDoc.exists) {
+      const result = await geocodeTown(group.country, group.region, group.town);
+      geocodedFresh++;
+      if (result) {
+        await geocodeRef.set({ ...result, geocodedAt: new Date().toISOString() });
+        geocodeDoc = await geocodeRef.get();
+      }
+    }
+
+    const geocode = geocodeDoc.data() as { lat: number; lng: number } | undefined;
+    if (geocode) {
+      await db
+        .collection(TOWN_AGGREGATE_COLLECTION)
+        .doc(slug)
+        .set(
+          {
+            country: group.country,
+            region: group.region,
+            town: group.town,
+            lat: geocode.lat,
+            lng: geocode.lng,
+            totalCount: group.total,
+            scrapedCount: group.scraped,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        );
+    }
+
+    processed++;
+    if (processed % 25 === 0) {
+      console.log(`  [backfill] ...${processed}/${byTown.size} towns processed (${geocodedFresh} freshly geocoded)`);
+    }
+  }
+  console.log(`  [backfill] done — ${processed} town(s) processed, ${geocodedFresh} freshly geocoded`);
+}
+
 export function fieldCompleteness(records: ScrapedCampsite[]): number {
   if (records.length === 0) return 0;
   const keyFields: (keyof ScrapedCampsite)[] = [
