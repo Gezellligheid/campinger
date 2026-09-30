@@ -1,4 +1,4 @@
-import type { SourceConfig } from "./types";
+import type { FocusedCountry, SitemapIndexSource, SourceConfig } from "./types";
 
 /**
  * Sources the scraper is allowed to hit.
@@ -69,33 +69,57 @@ export const sources: SourceConfig[] = [
       "block with address/geo/amenityFeature (French-language amenity " +
       "names)/aggregateRating.",
   },
+];
+
+/**
+ * Sitemaps to index every run: cheap (one fetch each), tags every URL with
+ * country/region, writes to the `campsite_index` Firestore collection —
+ * but never visits any of the listed URLs itself. See FocusedCountry in
+ * types.ts for the other half of the split: only indexed URLs whose
+ * country is in `focusedCountries` below ever actually get scraped.
+ *
+ * NOTE: unlike the three individual-campsite sources above, eurocampings.nl
+ * (/ ACSI) is a third-party directory, not an individual campsite's own
+ * site — its compiled listings are its own core commercial asset, and
+ * under EU law a compilation like this can carry a "database right"
+ * independent of any single page's copyright, separate from whatever
+ * robots.txt/ToS say about crawling. robots.txt is permissive (checked
+ * 2026-09-30 on both eurocampings.nl and eurocampings.co uk, which hosts
+ * this sitemap file cross-domain from the pages it lists — same rules on
+ * both: only /maintenance.html, /cpc/out/, /campsite/search/,
+ * /campsite/review/, /dfp/, /campsite/download-pdf/, /esi/, /index.php/,
+ * /clear-cache/ disallowed for User-agent: *, covering neither /sitemap/
+ * nor the individual /<country>/<region>/<town>/<slug>/ detail pages it
+ * lists) and I found no explicit no-scraping clause in their general terms
+ * (algemene voorwaarden), but I did not get a real legal opinion on the
+ * database-right question — that's a materially bigger compliance gap
+ * than the three sources above. Added at the user's explicit
+ * request/acceptance of that risk (chat, 2026-09-30); get an actual legal
+ * review before scaling focus beyond a small initial country list.
+ */
+export const sitemapIndexSources: SitemapIndexSource[] = [
   {
-    // NOTE: unlike the three above, this is a third-party directory
-    // (eurocampings.nl / ACSI), not an individual campsite's own site —
-    // its compiled listings are its own core commercial asset, and under
-    // EU law a compilation like this can carry a "database right"
-    // independent of any single page's copyright, separate from whatever
-    // robots.txt/ToS say about crawling. robots.txt is permissive and I
-    // found no explicit no-scraping clause in their general terms, but I
-    // did not get a real legal opinion on the database-right question —
-    // that's a materially bigger gap than the three sources above. Added
-    // at the user's explicit request/acceptance of that risk (chat,
-    // 2026-09-30); get an actual legal review before adding more
-    // eurocampings/ACSI-family sources or scaling this one up.
-    id: "eurocampings-belgische-kust",
-    label: "Eurocampings — Belgische Kust",
-    url: "https://www.eurocampings.nl/belgie/belgische-kust/",
-    adapter: "jsonld-listing",
-    maxItems: 10,
+    id: "eurocampings-campsite-sitemap",
+    label: "Eurocampings — full campsite sitemap",
+    url: "https://www.eurocampings.co.uk/sitemap/campsite.nl.xml",
+    parser: "eurocampings",
     complianceNote:
-      "robots.txt (eurocampings.nl, checked 2026-09-30) disallows only " +
-      "/maintenance.html, /cpc/out/, /campsite/search/, /campsite/review/, " +
-      "/dfp/, /campsite/download-pdf/, /esi/, /index.php/, /clear-cache/ " +
-      "for User-agent: * — neither this region-listing path nor the " +
-      "individual /belgie/<region>/<town>/<slug>/ detail pages it links to " +
-      "are covered (each discovered detail page still goes through " +
-      "politeFetch's own robots.txt check regardless). No explicit " +
-      "no-scraping clause found in their general terms (algemene " +
-      "voorwaarden) — see the aggregator/database-right caveat above.",
+      "robots.txt (eurocampings.nl and eurocampings.co.uk, checked " +
+      "2026-09-30) disallows only /maintenance.html, /cpc/out/, " +
+      "/campsite/search/, /campsite/review/, /dfp/, " +
+      "/campsite/download-pdf/, /esi/, /index.php/, /clear-cache/ for " +
+      "User-agent: * on both — /sitemap/ isn't covered. Indexing only " +
+      "reads this one sitemap file; it doesn't visit any campsite page " +
+      "itself (each one discovered still goes through politeFetch's own " +
+      "robots.txt check when/if a focused-country run actually visits it).",
   },
 ];
+
+/**
+ * Countries actively being built out — each run, pulls up to `maxItems`
+ * not-yet-scraped indexed URLs per country and scrapes full details for
+ * them via the same jsonld single-page path every other source uses.
+ * `country` must match the path segment parseEurocampingsEntry extracts
+ * (e.g. "belgie", not "belgium" or "Belgium").
+ */
+export const focusedCountries: FocusedCountry[] = [{ country: "belgie", label: "Belgium", maxItems: 20 }];

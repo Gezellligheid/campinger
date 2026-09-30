@@ -91,18 +91,62 @@ export interface SourceConfig {
    * "jsonld-listing" — a directory/search-results page: discover candidate
    * campsite detail-page URLs from its JSON-LD ItemList, then politely
    * fetch and jsonld-extract each one individually (same normalize path as
-   * "jsonld", just with a discovery step in front).
+   * "jsonld", just with a discovery step in front). Many sites only embed
+   * a small "featured" ItemList on listing pages, not the full result set.
+   * "sitemap" — discover candidate URLs from a sitemap.xml instead, which
+   * is *more* complete than an ItemList (sitemaps are published
+   * specifically to be crawled — the whole result set, not a snippet of
+   * it) and an even cleaner "meant to be machine-read" signal. `url`
+   * points at the sitemap XML itself, not a campsite page.
    */
-  adapter: "jsonld" | "jsonld-listing";
+  adapter: "jsonld" | "jsonld-listing" | "sitemap";
   /** Free-text note on the ToS/robots.txt review done for this source, per PLAN.md §2. */
   complianceNote: string;
   /**
-   * "jsonld-listing" only: cap on how many discovered detail pages to visit
-   * per run. Keeps one listing source from silently fetching an unbounded
-   * number of pages — politeFetch's per-host delay means a large listing
-   * would otherwise just make one run take a very long time.
+   * "jsonld-listing"/"sitemap" only: cap on how many discovered detail
+   * pages to visit per run. Keeps one source from silently fetching an
+   * unbounded number of pages — politeFetch's per-host delay means a large
+   * listing/sitemap would otherwise just make one run take a very long
+   * time (or, for a sitemap covering many countries, fetch far more than
+   * intended).
    */
   maxItems?: number;
+  /**
+   * "sitemap" only: restrict to URLs starting with this prefix (e.g. one
+   * country's section of a sitemap that covers many countries).
+   */
+  urlPrefix?: string;
+}
+
+/**
+ * A sitemap to index (cheap: one fetch, tag every URL with country/region,
+ * store it) WITHOUT visiting any of the URLs it lists. Separate from
+ * SourceConfig's "sitemap" adapter, which visits every discovered URL
+ * immediately — indexing decouples "what exists" from "what we've actually
+ * scraped full details for", so a sitemap covering thousands of pages
+ * (eurocampings.nl: ~9,700) doesn't force scraping all of them just to see
+ * any of them. Consumed by processFocusedCountries in run.ts.
+ */
+export interface SitemapIndexSource {
+  id: string;
+  label: string;
+  url: string;
+  /** Which parser understands this sitemap's URL structure. */
+  parser: "eurocampings";
+  complianceNote: string;
+}
+
+/**
+ * A country (matching the path segment SitemapIndexSource's parser
+ * extracts, e.g. "belgie") to actively pull full campsite details for, up
+ * to maxItems indexed-but-unscraped URLs per run — the "focus" half of the
+ * index/focus split. Add a country here once you're ready to build out
+ * that region; leave it out and its indexed URLs just sit unscraped.
+ */
+export interface FocusedCountry {
+  country: string;
+  label: string;
+  maxItems: number;
 }
 
 export interface SourceAdapter {
