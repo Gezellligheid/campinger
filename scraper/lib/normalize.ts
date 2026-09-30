@@ -11,6 +11,8 @@ export function slugify(input: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+const MAX_GALLERY_IMAGES = 6;
+
 function str(value: unknown): string | null {
   if (typeof value === "string" && value.trim()) return value.trim();
   return null;
@@ -22,23 +24,33 @@ function str(value: unknown): string | null {
  * seen both forms across real sources. `str()` alone silently drops the
  * object form.
  */
-// capfun.com publishes a 2-letter ISO code instead of a full name — expand
-// the handful actually seen so far rather than showing "FR" in the UI.
-const COUNTRY_CODE_NAMES: Record<string, string> = {
+// Sources publish country as a 2-letter code (capfun.com: "FR"), a 3-letter
+// code (eurocampings.nl ItemList summaries: "BEL"), or a native-language
+// name (eurocampings.nl detail pages: "België") instead of an English full
+// name — normalize the variants actually seen so far rather than showing
+// "FR"/"BEL"/"België" in the UI. Lookup is case-insensitive.
+const COUNTRY_NAME_MAP: Record<string, string> = {
   FR: "France",
   ES: "Spain",
   IT: "Italy",
   DE: "Germany",
   NL: "Netherlands",
   BE: "Belgium",
+  BEL: "Belgium",
   PT: "Portugal",
+  BELGIË: "Belgium",
+  BELGIE: "Belgium",
+  DEUTSCHLAND: "Germany",
+  ESPAÑA: "Spain",
+  NEDERLAND: "Netherlands",
 };
 
 function countryStr(value: unknown): string | null {
   const direct = str(value);
-  if (direct) return COUNTRY_CODE_NAMES[direct.toUpperCase()] ?? direct;
+  if (direct) return COUNTRY_NAME_MAP[direct.toUpperCase()] ?? direct;
   if (value && typeof value === "object") {
-    return str((value as Record<string, unknown>)["name"]);
+    const nested = str((value as Record<string, unknown>)["name"]);
+    return nested ? (COUNTRY_NAME_MAP[nested.toUpperCase()] ?? nested) : null;
   }
   return null;
 }
@@ -158,8 +170,13 @@ export function normalizeLodgingNode(
     lng: num(geo["longitude"]),
     description: str(node["description"]),
     heroImage: typeof image === "string" ? image : null,
+    // The UI only ever shows the first 3 (hero + 2 gallery slots) — some
+    // sources (eurocampings.nl) publish 30+ image URLs per listing, which
+    // would otherwise bloat every Firestore doc with data nothing reads.
     gallery: Array.isArray(node["image"])
-      ? (node["image"] as unknown[]).filter((v): v is string => typeof v === "string")
+      ? (node["image"] as unknown[])
+          .filter((v): v is string => typeof v === "string")
+          .slice(0, MAX_GALLERY_IMAGES)
       : image
         ? [image]
         : [],

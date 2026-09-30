@@ -69,4 +69,33 @@ export const sources: SourceConfig[] = [
       "block with address/geo/amenityFeature (French-language amenity " +
       "names)/aggregateRating.",
   },
+  {
+    // NOTE: unlike the three above, this is a third-party directory
+    // (eurocampings.nl / ACSI), not an individual campsite's own site —
+    // its compiled listings are its own core commercial asset, and under
+    // EU law a compilation like this can carry a "database right"
+    // independent of any single page's copyright, separate from whatever
+    // robots.txt/ToS say about crawling. robots.txt is permissive and I
+    // found no explicit no-scraping clause in their general terms, but I
+    // did not get a real legal opinion on the database-right question —
+    // that's a materially bigger gap than the three sources above. Added
+    // at the user's explicit request/acceptance of that risk (chat,
+    // 2026-09-30); get an actual legal review before adding more
+    // eurocampings/ACSI-family sources or scaling this one up.
+    id: "eurocampings-belgische-kust",
+    label: "Eurocampings — Belgische Kust",
+    url: "https://www.eurocampings.nl/belgie/belgische-kust/",
+    adapter: "jsonld-listing",
+    maxItems: 10,
+    complianceNote:
+      "robots.txt (eurocampings.nl, checked 2026-09-30) disallows only " +
+      "/maintenance.html, /cpc/out/, /campsite/search/, /campsite/review/, " +
+      "/dfp/, /campsite/download-pdf/, /esi/, /index.php/, /clear-cache/ " +
+      "for User-agent: * — neither this region-listing path nor the " +
+      "individual /belgie/<region>/<town>/<slug>/ detail pages it links to " +
+      "are covered (each discovered detail page still goes through " +
+      "politeFetch's own robots.txt check regardless). No explicit " +
+      "no-scraping clause found in their general terms (algemene " +
+      "voorwaarden) — see the aggregator/database-right caveat above.",
+  },
 ];

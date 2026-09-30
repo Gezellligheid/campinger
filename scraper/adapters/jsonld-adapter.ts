@@ -1,7 +1,7 @@
 import { politeFetch, RobotsDisallowedError } from "../lib/politeFetch";
 import { extractLodgingNodes } from "../lib/jsonld";
 import { normalizeLodgingNode } from "../lib/normalize";
-import type { AdapterResult, SourceAdapter, SourceConfig } from "../types";
+import type { AdapterResult, ScrapedCampsite, SourceAdapter, SourceConfig } from "../types";
 
 /**
  * A single detail page sometimes publishes more than one qualifying JSON-LD
@@ -33,10 +33,40 @@ function mergeNodes(nodes: Record<string, unknown>[]): Record<string, unknown> {
 }
 
 /**
- * Generic adapter: fetch a single listing/detail page and pull whatever
- * schema.org LodgingBusiness/Campground JSON-LD it publishes. Works against
- * any source without site-specific selectors — the first-priority strategy
- * from PLAN.md §5.
+ * Fetch one page and pull a single normalized campsite record out of
+ * whatever schema.org LodgingBusiness/Campground JSON-LD it publishes.
+ * Shared by the "jsonld" adapter (one source = one page) and the
+ * "jsonld-listing" adapter (one page per discovered URL).
+ */
+export async function fetchAndExtractOne(
+  url: string,
+  dataSource: string,
+): Promise<{ record: ScrapedCampsite | null; issue: string | null }> {
+  const res = await politeFetch(url);
+  if (!res.ok) {
+    return { record: null, issue: `HTTP ${res.status} fetching ${url}` };
+  }
+
+  const html = await res.text();
+  const nodes = extractLodgingNodes(html);
+  if (nodes.length === 0) {
+    return { record: null, issue: `no LodgingBusiness/Campground JSON-LD found on ${url}` };
+  }
+
+  const merged = mergeNodes(nodes);
+  const record = normalizeLodgingNode(merged, url, dataSource);
+  if (!record) {
+    return { record: null, issue: `found JSON-LD nodes but none had a usable name on ${url}` };
+  }
+
+  return { record, issue: null };
+}
+
+/**
+ * Generic adapter: fetch a single detail page and pull whatever schema.org
+ * LodgingBusiness/Campground JSON-LD it publishes. Works against any source
+ * without site-specific selectors — the first-priority strategy from
+ * PLAN.md §5.
  */
 export const jsonldAdapter: SourceAdapter = {
   id: "jsonld",
@@ -46,30 +76,9 @@ export const jsonldAdapter: SourceAdapter = {
     const issues: AdapterResult["issues"] = [];
 
     try {
-      const res = await politeFetch(source.url);
-      if (!res.ok) {
-        issues.push({ sourceId: source.id, message: `HTTP ${res.status} fetching ${source.url}` });
-        return { sourceId: source.id, adapter: "jsonld", records: [], issues, fetchedAt };
-      }
-
-      const html = await res.text();
-      const nodes = extractLodgingNodes(html);
-      if (nodes.length === 0) {
-        issues.push({
-          sourceId: source.id,
-          message: "no LodgingBusiness/Campground JSON-LD found on page",
-        });
-      }
-
-      const merged = nodes.length > 0 ? mergeNodes(nodes) : null;
-      const record = merged ? normalizeLodgingNode(merged, source.url, source.id) : null;
-      const records = record ? [record] : [];
-
-      if (records.length === 0 && nodes.length > 0) {
-        issues.push({ sourceId: source.id, message: "found JSON-LD nodes but none had a usable name" });
-      }
-
-      return { sourceId: source.id, adapter: "jsonld", records, issues, fetchedAt };
+      const { record, issue } = await fetchAndExtractOne(source.url, source.id);
+      if (issue) issues.push({ sourceId: source.id, message: issue });
+      return { sourceId: source.id, adapter: "jsonld", records: record ? [record] : [], issues, fetchedAt };
     } catch (err) {
       const message =
         err instanceof RobotsDisallowedError

@@ -86,9 +86,23 @@ export interface SourceConfig {
   id: string;
   label: string;
   url: string;
-  adapter: "jsonld";
+  /**
+   * "jsonld" — one detail page, one campsite (PLAN.md §5 point 2/3).
+   * "jsonld-listing" — a directory/search-results page: discover candidate
+   * campsite detail-page URLs from its JSON-LD ItemList, then politely
+   * fetch and jsonld-extract each one individually (same normalize path as
+   * "jsonld", just with a discovery step in front).
+   */
+  adapter: "jsonld" | "jsonld-listing";
   /** Free-text note on the ToS/robots.txt review done for this source, per PLAN.md §2. */
   complianceNote: string;
+  /**
+   * "jsonld-listing" only: cap on how many discovered detail pages to visit
+   * per run. Keeps one listing source from silently fetching an unbounded
+   * number of pages — politeFetch's per-host delay means a large listing
+   * would otherwise just make one run take a very long time.
+   */
+  maxItems?: number;
 }
 
 export interface SourceAdapter {

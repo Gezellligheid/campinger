@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { jsonldAdapter } from "./adapters/jsonld-adapter";
+import { jsonldListingAdapter } from "./adapters/jsonld-listing-adapter";
 import {
   fieldCompleteness,
   hasFirestoreCredentials,
@@ -12,6 +13,7 @@ import type { AdapterResult, ScrapedCampsite, SourceAdapter, SourceAdapterHealth
 
 const adaptersById: Record<string, SourceAdapter> = {
   jsonld: jsonldAdapter,
+  "jsonld-listing": jsonldListingAdapter,
 };
 
 const OUTPUT_DIR = path.join(__dirname, "output");
