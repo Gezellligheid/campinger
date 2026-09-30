@@ -274,7 +274,8 @@ export default function MapView({
         // on el, not pill, but set this inline too so it can't be
         // overridden by source order against any Tailwind class.
         pill.style.transition = "scale 150ms ease-out, background-color 150ms ease-out";
-        pill.textContent = `€${campsite.priceEstimate.low}`;
+        const hasPrice = campsite.priceEstimate.low > 0 || campsite.priceEstimate.high > 0;
+        pill.textContent = hasPrice ? `€${campsite.priceEstimate.low}` : "n/a";
         pill.addEventListener("mouseenter", () => onHover(campsite.id));
         pill.addEventListener("mouseleave", () => onHover(null));
         pill.addEventListener("click", () => router.push(`/campsite/${campsite.slug}`));
