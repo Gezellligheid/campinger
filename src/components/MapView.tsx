@@ -11,11 +11,15 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { useRouter } from "next/navigation";
 import type { Campsite } from "@/lib/types";
+import type { TownAggregate } from "@/lib/townAggregates";
 
 const TILE_STYLE = "https://tiles.openfreemap.org/styles/positron";
 const SOURCE_ID = "campsites";
 const CLUSTER_LAYER = "campsite-clusters";
 const CLUSTER_COUNT_LAYER = "campsite-cluster-count";
+const PLACEHOLDER_SOURCE_ID = "placeholders";
+const PLACEHOLDER_LAYER = "placeholder-points";
+const PLACEHOLDER_COUNT_LAYER = "placeholder-count";
 
 function toFeatureCollection(campsites: Campsite[]) {
   return {
@@ -28,12 +32,28 @@ function toFeatureCollection(campsites: Campsite[]) {
   };
 }
 
+// Each feature already represents one town's aggregate (not a raw point),
+// so this source is never passed through MapLibre's own cluster:true —
+// `remaining` drives the circle size/label directly instead.
+function toPlaceholderFeatureCollection(placeholders: TownAggregate[]) {
+  return {
+    type: "FeatureCollection" as const,
+    features: placeholders.map((p) => ({
+      type: "Feature" as const,
+      properties: { id: p.id, remaining: p.remaining },
+      geometry: { type: "Point" as const, coordinates: [p.lng, p.lat] },
+    })),
+  };
+}
+
 export default function MapView({
   campsites,
+  placeholders = [],
   hoveredId,
   onHover,
 }: {
   campsites: Campsite[];
+  placeholders?: TownAggregate[];
   hoveredId: string | null;
   onHover: (id: string | null) => void;
 }) {
@@ -119,6 +139,63 @@ export default function MapView({
         map.getCanvas().style.cursor = "";
       });
 
+      // Placeholder markers: towns the scraper knows (from a sitemap) have
+      // campsites it hasn't visited/scraped full details for yet. Styled
+      // distinctly from the real forest-green clusters above — a muted,
+      // outlined sand tone reads as "known but not loaded", not a real
+      // pin. Added below the real layers so a real cluster/pin always
+      // draws on top where the two coincide.
+      map.addSource(PLACEHOLDER_SOURCE_ID, {
+        type: "geojson",
+        data: toPlaceholderFeatureCollection([]),
+      });
+
+      map.addLayer(
+        {
+          id: PLACEHOLDER_LAYER,
+          type: "circle",
+          source: PLACEHOLDER_SOURCE_ID,
+          paint: {
+            "circle-color": "rgba(204,167,95,0.35)", // sand-500 @ 35%
+            "circle-radius": ["step", ["get", "remaining"], 14, 10, 18, 50, 24, 200, 30],
+            "circle-stroke-width": 2,
+            "circle-stroke-color": "#b08a45", // sand-600
+          },
+        },
+        CLUSTER_LAYER,
+      );
+
+      map.addLayer(
+        {
+          id: PLACEHOLDER_COUNT_LAYER,
+          type: "symbol",
+          source: PLACEHOLDER_SOURCE_ID,
+          layout: {
+            "text-field": ["get", "remaining"],
+            "text-font": ["Noto Sans Bold"],
+            "text-size": 12,
+          },
+          paint: { "text-color": "#82371d" }, // terracotta-700
+        },
+        CLUSTER_LAYER,
+      );
+
+      map.on("click", PLACEHOLDER_LAYER, (e) => {
+        const [feature] = map.queryRenderedFeatures(e.point, { layers: [PLACEHOLDER_LAYER] });
+        if (feature?.geometry.type !== "Point") return;
+        map.easeTo({
+          center: feature.geometry.coordinates as [number, number],
+          zoom: Math.min(map.getZoom() + 2, 14),
+          duration: 400,
+        });
+      });
+      map.on("mouseenter", PLACEHOLDER_LAYER, () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", PLACEHOLDER_LAYER, () => {
+        map.getCanvas().style.cursor = "";
+      });
+
       setReady(true);
     });
 
@@ -138,15 +215,18 @@ export default function MapView({
     if (!map || !ready) return;
 
     const source = map.getSource(SOURCE_ID) as GeoJSONSource | undefined;
-    if (!source) return;
-    source.setData(toFeatureCollection(campsites));
+    if (source) source.setData(toFeatureCollection(campsites));
 
-    if (campsites.length > 0) {
+    const placeholderSource = map.getSource(PLACEHOLDER_SOURCE_ID) as GeoJSONSource | undefined;
+    if (placeholderSource) placeholderSource.setData(toPlaceholderFeatureCollection(placeholders));
+
+    if (campsites.length > 0 || placeholders.length > 0) {
       const bounds = new LngLatBounds();
       campsites.forEach((c) => bounds.extend([c.lng, c.lat]));
+      placeholders.forEach((p) => bounds.extend([p.lng, p.lat]));
       map.fitBounds(bounds, { padding: 64, maxZoom: 9, duration: 400 });
     }
-  }, [campsites, ready]);
+  }, [campsites, placeholders, ready]);
 
   // Custom DOM price-pill markers only for points NOT currently folded into
   // a cluster bubble — clusters render as the circle+count layers above.
@@ -244,7 +324,7 @@ export default function MapView({
   return (
     <div className="relative h-full w-full overflow-hidden rounded-2xl bg-forest-100">
       <div ref={containerRef} className="h-full w-full" />
-      {campsites.length === 0 && (
+      {campsites.length === 0 && placeholders.length === 0 && (
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-ink-500">
           No campsites match these filters yet.
         </div>

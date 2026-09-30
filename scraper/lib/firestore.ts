@@ -1,7 +1,8 @@
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 import type { AdapterResult, ScrapedCampsite, SourceAdapterHealth } from "../types";
-import type { SitemapIndexEntry } from "./sitemapIndex";
+import { townSlug, type SitemapIndexEntry } from "./sitemapIndex";
+import { geocodeTown } from "./geocode";
 
 /**
  * Firestore writes are optional: only attempted when a service-account key
@@ -97,7 +98,7 @@ function slugFromUrl(url: string): string {
  */
 export async function upsertSitemapIndex(
   entries: SitemapIndexEntry[],
-): Promise<{ added: number; skipped: number }> {
+): Promise<{ added: number; skipped: number; addedEntries: SitemapIndexEntry[] }> {
   const db = getDb();
   const collection = db.collection(INDEX_COLLECTION);
 
@@ -111,7 +112,7 @@ export async function upsertSitemapIndex(
   const discoveredAt = new Date().toISOString();
   let batch = db.batch();
   let opsInBatch = 0;
-  let added = 0;
+  const addedEntries: SitemapIndexEntry[] = [];
 
   const flushIfNeeded = async () => {
     if (opsInBatch >= 400) {
@@ -125,13 +126,101 @@ export async function upsertSitemapIndex(
     const id = slugFromUrl(entry.url);
     if (existingIds.has(id)) continue;
     batch.set(collection.doc(id), { ...entry, scraped: false, discoveredAt });
-    added++;
+    addedEntries.push(entry);
     opsInBatch++;
     await flushIfNeeded();
   }
   if (opsInBatch > 0) await batch.commit();
 
-  return { added, skipped: entries.length - added };
+  return { added: addedEntries.length, skipped: entries.length - addedEntries.length, addedEntries };
+}
+
+const TOWN_AGGREGATE_COLLECTION = "town_aggregates";
+const GEOCODE_CACHE_COLLECTION = "geocode_cache";
+
+/**
+ * For newly-indexed entries, ensure their town has a geocoded position and
+ * bump that town's `totalCount` — the data behind the map's placeholder
+ * markers for campsites that are known (from the sitemap) but not yet
+ * fully scraped. Geocoding only happens once per unique town (cached in
+ * `geocode_cache`); re-running with the same towns costs no extra Nominatim
+ * requests.
+ */
+export async function ensureTownAggregates(entries: SitemapIndexEntry[]): Promise<void> {
+  const db = getDb();
+  const byTown = new Map<string, { country: string; region: string | null; town: string | null; count: number }>();
+
+  for (const entry of entries) {
+    const slug = townSlug(entry.country, entry.region, entry.town);
+    const existing = byTown.get(slug);
+    if (existing) {
+      existing.count++;
+    } else {
+      byTown.set(slug, { country: entry.country, region: entry.region, town: entry.town, count: 1 });
+    }
+  }
+
+  console.log(`    ${byTown.size} distinct town(s) among ${entries.length} newly indexed entr(y/ies)`);
+  let processed = 0;
+  let geocodedFresh = 0;
+
+  for (const [slug, group] of byTown) {
+    const geocodeRef = db.collection(GEOCODE_CACHE_COLLECTION).doc(slug);
+    let geocodeDoc = await geocodeRef.get();
+
+    if (!geocodeDoc.exists) {
+      const result = await geocodeTown(group.country, group.region, group.town);
+      geocodedFresh++;
+      if (!result) continue; // couldn't geocode this town — skip its aggregate, don't block others
+      await geocodeRef.set({ ...result, geocodedAt: new Date().toISOString() });
+      geocodeDoc = await geocodeRef.get();
+    }
+
+    processed++;
+    if (processed % 25 === 0) {
+      console.log(`    ...${processed}/${byTown.size} towns processed (${geocodedFresh} freshly geocoded)`);
+    }
+
+    const geocode = geocodeDoc.data() as { lat: number; lng: number } | undefined;
+    if (!geocode) continue;
+
+    const aggregateRef = db.collection(TOWN_AGGREGATE_COLLECTION).doc(slug);
+    await db.runTransaction(async (tx) => {
+      const doc = await tx.get(aggregateRef);
+      const current = doc.data() as { totalCount?: number; scrapedCount?: number } | undefined;
+      tx.set(
+        aggregateRef,
+        {
+          country: group.country,
+          region: group.region,
+          town: group.town,
+          lat: geocode.lat,
+          lng: geocode.lng,
+          totalCount: (current?.totalCount ?? 0) + group.count,
+          scrapedCount: current?.scrapedCount ?? 0,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true },
+      );
+    });
+  }
+}
+
+/** Called after a focus run actually scrapes a campsite — moves it from "known" to "loaded" in its town's aggregate. */
+export async function incrementScrapedCount(
+  country: string,
+  region: string | null,
+  town: string | null,
+): Promise<void> {
+  const db = getDb();
+  const slug = townSlug(country, region, town);
+  const aggregateRef = db.collection(TOWN_AGGREGATE_COLLECTION).doc(slug);
+  await db.runTransaction(async (tx) => {
+    const doc = await tx.get(aggregateRef);
+    if (!doc.exists) return; // no aggregate (e.g. town failed to geocode) — nothing to update
+    const current = doc.data() as { scrapedCount?: number };
+    tx.set(aggregateRef, { scrapedCount: (current.scrapedCount ?? 0) + 1 }, { merge: true });
+  });
 }
 
 /**
@@ -143,11 +232,19 @@ export async function upsertSitemapIndex(
 export async function getFocusedCountryUrls(
   country: string,
   limit: number,
-): Promise<{ id: string; url: string }[]> {
+): Promise<{ id: string; url: string; region: string | null; town: string | null }[]> {
   const db = getDb();
   const snap = await db.collection(INDEX_COLLECTION).where("country", "==", country).get();
   const unscraped = snap.docs.filter((d) => d.data()["scraped"] === false);
-  return unscraped.slice(0, limit).map((d) => ({ id: d.id, url: d.data()["url"] as string }));
+  return unscraped.slice(0, limit).map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      url: data["url"] as string,
+      region: (data["region"] as string | null) ?? null,
+      town: (data["town"] as string | null) ?? null,
+    };
+  });
 }
 
 export async function markIndexEntriesScraped(ids: string[]): Promise<void> {

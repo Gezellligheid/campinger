@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { SlidersHorizontal, X } from "lucide-react";
 import { fetchCampsites } from "@/lib/campsites";
+import { fetchTownAggregates, type TownAggregate } from "@/lib/townAggregates";
 import type { Campsite } from "@/lib/types";
 import SearchBar from "@/components/SearchBar";
 import CampsiteCard from "@/components/CampsiteCard";
@@ -34,6 +35,7 @@ export default function SearchResults({
   const [mobileView, setMobileView] = useState<"list" | "map">("list");
   const [allCampsites, setAllCampsites] = useState<Campsite[] | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [placeholders, setPlaceholders] = useState<TownAggregate[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +48,13 @@ export default function SearchResults({
           setFetchError(err instanceof Error ? err.message : "Failed to load campsites");
         }
       });
+    // Best-effort: placeholder markers are a nice-to-have, not core
+    // functionality — a failure here shouldn't affect the rest of the page.
+    fetchTownAggregates()
+      .then((data) => {
+        if (!cancelled) setPlaceholders(data);
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -97,6 +106,14 @@ export default function SearchResults({
 
     return sorted;
   }, [base, location, filters, sort]);
+
+  const filteredPlaceholders = useMemo(() => {
+    const loc = location.trim().toLowerCase();
+    if (!loc) return placeholders;
+    return placeholders.filter((p) =>
+      `${p.town ?? ""} ${p.region ?? ""} ${p.country}`.toLowerCase().includes(loc),
+    );
+  }, [placeholders, location]);
 
   return (
     <div className="flex flex-1 flex-col">
@@ -214,7 +231,12 @@ export default function SearchResults({
           }`}
         >
           <div className="h-[60vh] lg:h-full">
-            <MapView campsites={filtered} hoveredId={hoveredId} onHover={setHoveredId} />
+            <MapView
+              campsites={filtered}
+              placeholders={filteredPlaceholders}
+              hoveredId={hoveredId}
+              onHover={setHoveredId}
+            />
           </div>
         </div>
       </div>

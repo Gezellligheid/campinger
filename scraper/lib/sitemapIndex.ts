@@ -17,6 +17,11 @@ export interface SitemapIndexEntry {
  * Other sitemap sources would need their own parser if/when added — this
  * one is deliberately specific rather than a guessed-at generic shape.
  */
+/** Stable doc-id for a town-level aggregate/geocode-cache entry. */
+export function townSlug(country: string, region: string | null, town: string | null): string {
+  return [country, region ?? "_", town ?? "_"].join("__");
+}
+
 export function parseEurocampingsEntry(url: string): SitemapIndexEntry | null {
   let path: string;
   try {

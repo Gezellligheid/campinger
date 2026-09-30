@@ -14,6 +14,18 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Town-level placeholder data for the map (see src/lib/townAggregates.ts)
+    // — also public/read-only, also Admin-SDK-written only.
+    match /town_aggregates/{townId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // campsite_index and geocode_cache are scraper-internal bookkeeping
+    // (which URLs exist, geocode cache) — never read by the site, so they
+    // stay fully locked down by the catch-all below rather than getting
+    // their own `read: if true` rule.
+
     // Everything else (including any leftover data from other apps in this
     // project) stays locked down by default.
     match /{document=**} {

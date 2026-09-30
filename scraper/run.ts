@@ -4,9 +4,11 @@ import { jsonldAdapter, fetchAndExtractOne } from "./adapters/jsonld-adapter";
 import { jsonldListingAdapter } from "./adapters/jsonld-listing-adapter";
 import { sitemapAdapter } from "./adapters/sitemap-adapter";
 import {
+  ensureTownAggregates,
   fieldCompleteness,
   getFocusedCountryUrls,
   hasFirestoreCredentials,
+  incrementScrapedCount,
   markIndexEntriesScraped,
   upsertSitemapIndex,
   writeAdapterHealthToFirestore,
@@ -50,10 +52,18 @@ async function runIndexing(): Promise<void> {
       const xml = await res.text();
       const urls = extractSitemapUrls(xml);
       const entries = urls.map(parse).filter((e) => e !== null);
-      const { added, skipped } = await upsertSitemapIndex(entries);
+      const { added, skipped, addedEntries } = await upsertSitemapIndex(entries);
       console.log(
         `  [index:${indexSource.id}] ${urls.length} URL(s) in sitemap, ${added} newly indexed, ${skipped} already known`,
       );
+
+      if (addedEntries.length > 0) {
+        console.log(
+          `  [index:${indexSource.id}] geocoding new towns for map placeholders (1 req/sec, this can take a while on a big first run)...`,
+        );
+        await ensureTownAggregates(addedEntries);
+        console.log(`  [index:${indexSource.id}] town aggregates updated`);
+      }
     } catch (err) {
       console.warn(`  [index:${indexSource.id}] indexing failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -90,7 +100,10 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
       attemptedIds.push(entry.id);
       try {
         const { record, issue } = await fetchAndExtractOne(entry.url, dataSource);
-        if (record) records.push(record);
+        if (record) {
+          records.push(record);
+          await incrementScrapedCount(focus.country, entry.region, entry.town);
+        }
         if (issue) console.warn(`  [focus:${focus.country}] ${issue}`);
       } catch (err) {
         const message =
