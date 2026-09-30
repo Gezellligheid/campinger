@@ -9,6 +9,7 @@ import type { Campsite } from "@/lib/types";
 import SearchBar from "@/components/SearchBar";
 import CampsiteCard from "@/components/CampsiteCard";
 import FilterSidebar, { defaultFilters, type Filters } from "./FilterSidebar";
+import type { MapBounds } from "@/components/MapView";
 
 const MapView = dynamic(() => import("@/components/MapView"), {
   ssr: false,
@@ -36,6 +37,7 @@ export default function SearchResults({
   const [allCampsites, setAllCampsites] = useState<Campsite[] | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [placeholders, setPlaceholders] = useState<TownAggregate[]>([]);
+  const [viewportBounds, setViewportBounds] = useState<MapBounds | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +109,17 @@ export default function SearchResults({
     return sorted;
   }, [base, location, filters, sort]);
 
+  // "Search as I move the map": once the map reports a viewport, the list
+  // only shows campsites currently on screen — panning/zooming the map
+  // updates the list, matching the Airbnb/Zillow pattern. Falls back to
+  // the full filtered list before the map has reported its first viewport
+  // (e.g. still loading) so the list isn't empty on initial paint.
+  const inViewport = useMemo(() => {
+    if (!viewportBounds) return filtered;
+    const { west, south, east, north } = viewportBounds;
+    return filtered.filter((c) => c.lng >= west && c.lng <= east && c.lat >= south && c.lat <= north);
+  }, [filtered, viewportBounds]);
+
   const filteredPlaceholders = useMemo(() => {
     const loc = location.trim().toLowerCase();
     if (!loc) return placeholders;
@@ -136,7 +149,7 @@ export default function SearchResults({
             ? "Couldn't load campsites"
             : allCampsites === null
               ? "Loading campsites…"
-              : `${filtered.length} campsite${filtered.length === 1 ? "" : "s"}`}
+              : `${inViewport.length} campsite${inViewport.length === 1 ? "" : "s"} in this area`}
           {!fetchError && allCampsites !== null && location && (
             <>
               {" "}
@@ -211,9 +224,19 @@ export default function SearchResults({
                   : "Try widening your price range or clearing a filter."}
               </p>
             </div>
+          ) : inViewport.length === 0 ? (
+            <div className="flex h-64 flex-col items-center justify-center rounded-2xl bg-white text-center ring-1 ring-forest-900/5">
+              <p className="font-display text-lg font-semibold text-ink-900">
+                No campsites in this area
+              </p>
+              <p className="mt-1 max-w-xs text-sm text-ink-500">
+                Pan or zoom out on the map to see more — {filtered.length} match your filters
+                elsewhere.
+              </p>
+            </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-              {filtered.map((c) => (
+              {inViewport.map((c) => (
                 <CampsiteCard
                   key={c.id}
                   campsite={c}
@@ -236,6 +259,7 @@ export default function SearchResults({
               placeholders={filteredPlaceholders}
               hoveredId={hoveredId}
               onHover={setHoveredId}
+              onBoundsChange={setViewportBounds}
             />
           </div>
         </div>

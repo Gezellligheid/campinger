@@ -46,16 +46,31 @@ function toPlaceholderFeatureCollection(placeholders: TownAggregate[]) {
   };
 }
 
+export interface MapBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
 export default function MapView({
   campsites,
   placeholders = [],
   hoveredId,
   onHover,
+  onBoundsChange,
 }: {
   campsites: Campsite[];
   placeholders?: TownAggregate[];
   hoveredId: string | null;
   onHover: (id: string | null) => void;
+  /**
+   * Fired on every pan/zoom (and once after the initial fitBounds) with the
+   * map's current visible bounds — lets the parent filter the list to
+   * "campsites currently visible on the map", the standard
+   * Airbnb/Zillow-style "search as I move the map" pattern.
+   */
+  onBoundsChange?: (bounds: MapBounds) => void;
 }) {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -63,11 +78,16 @@ export default function MapView({
   const markersRef = useRef<Map<string, Marker>>(new Map());
   const pillsRef = useRef<Map<string, HTMLButtonElement>>(new Map());
   const campsitesRef = useRef<Campsite[]>(campsites);
+  const onBoundsChangeRef = useRef(onBoundsChange);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     campsitesRef.current = campsites;
   }, [campsites]);
+
+  useEffect(() => {
+    onBoundsChangeRef.current = onBoundsChange;
+  }, [onBoundsChange]);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -309,6 +329,32 @@ export default function MapView({
       map.off("idle", syncMarkers);
     };
   }, [ready, campsites, onHover, router]);
+
+  // Report the visible viewport to the parent on every pan/zoom, so the
+  // list can show "campsites currently on screen" — not tied to the
+  // campsites/placeholders data effects above since it only cares about
+  // camera movement, not dataset changes.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+
+    function reportBounds() {
+      if (!map) return;
+      const b = map.getBounds();
+      onBoundsChangeRef.current?.({
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      });
+    }
+
+    reportBounds();
+    map.on("moveend", reportBounds);
+    return () => {
+      map.off("moveend", reportBounds);
+    };
+  }, [ready]);
 
   useEffect(() => {
     pillsRef.current.forEach((pill, id) => {
