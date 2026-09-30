@@ -122,4 +122,10 @@ export const sitemapIndexSources: SitemapIndexSource[] = [
  * `country` must match the path segment parseEurocampingsEntry extracts
  * (e.g. "belgie", not "belgium" or "Belgium").
  */
-export const focusedCountries: FocusedCountry[] = [{ country: "belgie", label: "Belgium", maxItems: 20 }];
+export const focusedCountries: FocusedCountry[] = [
+  { country: "belgie", label: "Belgium", maxItems: 20 },
+  // France is the largest country in the sitemap (~2,865 entries) — at
+  // 20/run it'll take a long time to fully cover, but that's the
+  // intentional politeness tradeoff (see the file-header note above).
+  { country: "frankrijk", label: "France", maxItems: 20 },
+];
