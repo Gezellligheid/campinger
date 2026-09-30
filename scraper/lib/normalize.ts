@@ -121,9 +121,26 @@ function extractOffers(node: Record<string, unknown>, scrapedAt: string): PriceS
     });
   }
 
-  // Some sites only publish a coarse priceRange (e.g. "€€" or "20-40 EUR") — skip,
-  // it's not a usable numeric snapshot.
   return snapshots;
+}
+
+/**
+ * Fallback for sites that publish `priceRange` as free text instead of a
+ * structured `offers`/`makesOffer`. Handles two real shapes seen so far:
+ * a single "from" price ("A partir de 127.20€", "Vanaf €25") and an
+ * explicit range ("€20-€40", "20-40 EUR"). Purely qualitative tiers
+ * ("€€", "$$") have no digits at all and correctly fall through to null —
+ * deliberately NOT guessed at, per PLAN.md's "don't fabricate estimates
+ * from unreliable signals" stance.
+ */
+function parsePriceRangeText(text: string): { low: number; high: number; currency: string } | null {
+  const numbers = [...text.matchAll(/\d+(?:[.,]\d+)?/g)]
+    .map((m) => Number(m[0].replace(",", ".")))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (numbers.length === 0) return null;
+
+  const currency = /£/.test(text) ? "GBP" : /\$/.test(text) ? "USD" : "EUR";
+  return { low: Math.min(...numbers), high: Math.max(...numbers), currency };
 }
 
 function extractRating(node: Record<string, unknown>): {
@@ -159,6 +176,14 @@ export function normalizeLodgingNode(
   const priceSnapshots = extractOffers(node, scrapedAt);
   const { rating, reviewCount } = extractRating(node);
 
+  // Real structured offers win when present (hasLivePricing: true). With
+  // none, fall back to parsing the coarser `priceRange` text field — that's
+  // still just a parsed estimate, not a live quote, so hasLivePricing stays
+  // false for it even though we now have *a* number to show.
+  const derived = derivePriceEstimate(priceSnapshots);
+  const priceEstimate = derived.priceEstimate ?? parsePriceRangeText(str(node["priceRange"]) ?? "");
+  const hasLivePricing = derived.hasLivePricing;
+
   return {
     name,
     slug: slugify(name),
@@ -188,6 +213,7 @@ export function normalizeLodgingNode(
     priceSnapshots,
     dataSource,
     lastScrapedAt: scrapedAt,
-    ...derivePriceEstimate(priceSnapshots),
+    priceEstimate,
+    hasLivePricing,
   };
 }
