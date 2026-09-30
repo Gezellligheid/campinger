@@ -16,6 +16,33 @@ function str(value: unknown): string | null {
   return null;
 }
 
+/**
+ * schema.org `addressCountry` is valid either as plain Text ("France", "FR")
+ * or as a nested Country object ({ "@type": "Country", "name": "France" }) —
+ * seen both forms across real sources. `str()` alone silently drops the
+ * object form.
+ */
+// capfun.com publishes a 2-letter ISO code instead of a full name — expand
+// the handful actually seen so far rather than showing "FR" in the UI.
+const COUNTRY_CODE_NAMES: Record<string, string> = {
+  FR: "France",
+  ES: "Spain",
+  IT: "Italy",
+  DE: "Germany",
+  NL: "Netherlands",
+  BE: "Belgium",
+  PT: "Portugal",
+};
+
+function countryStr(value: unknown): string | null {
+  const direct = str(value);
+  if (direct) return COUNTRY_CODE_NAMES[direct.toUpperCase()] ?? direct;
+  if (value && typeof value === "object") {
+    return str((value as Record<string, unknown>)["name"]);
+  }
+  return null;
+}
+
 function num(value: unknown): number | null {
   const n = typeof value === "string" ? Number(value) : value;
   return typeof n === "number" && Number.isFinite(n) ? n : null;
@@ -26,15 +53,17 @@ function firstOf<T>(value: T | T[] | undefined | null): T | null {
   return value ?? null;
 }
 
+// English and French keywords — several real sources (les-castels.com,
+// sandaya.fr, capfun.com) publish amenityFeature names in French.
 const AMENITY_KEYWORDS: [RegExp, Amenity][] = [
-  [/pool|swim/i, "pool"],
+  [/pool|swim|piscine/i, "pool"],
   [/wi-?fi|internet/i, "wifi"],
-  [/pet|dog/i, "pets"],
-  [/electric|hook-?up/i, "electricity"],
-  [/shower|toilet|sanitary/i, "showers"],
-  [/playground|kids|children/i, "playground"],
-  [/restaurant|snack|bar|shop/i, "restaurant"],
-  [/accessible|wheelchair|disab/i, "accessible"],
+  [/pet|dog|anima(l|ux)/i, "pets"],
+  [/electric|hook-?up|électri|raccordement/i, "electricity"],
+  [/shower|toilet|sanitary|douche|sanitaire/i, "showers"],
+  [/playground|aire de jeux/i, "playground"],
+  [/restaurant|snack|bar|shop|épicerie/i, "restaurant"],
+  [/accessible|wheelchair|disab|accessibilit|handicap|pmr/i, "accessible"],
 ];
 
 function guessAmenities(node: Record<string, unknown>): Amenity[] {
@@ -123,7 +152,7 @@ export function normalizeLodgingNode(
     slug: slugify(name),
     sourceUrl,
     bookingUrl,
-    country: str(address["addressCountry"]),
+    country: countryStr(address["addressCountry"]),
     region: str(address["addressRegion"]) ?? str(address["addressLocality"]),
     lat: num(geo["latitude"]),
     lng: num(geo["longitude"]),
