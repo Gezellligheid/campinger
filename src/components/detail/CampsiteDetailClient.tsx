@@ -109,6 +109,7 @@ export default function CampsiteDetailClient({ slug }: { slug: string }) {
                 alt={campsite.name}
                 fill
                 priority
+                unoptimized
                 sizes="(min-width: 640px) 50vw, 100vw"
                 className="object-cover"
               />
@@ -119,6 +120,7 @@ export default function CampsiteDetailClient({ slug }: { slug: string }) {
                   src={src}
                   alt={`${campsite.name} photo ${i + 2}`}
                   fill
+                  unoptimized
                   sizes="25vw"
                   className="object-cover"
                 />

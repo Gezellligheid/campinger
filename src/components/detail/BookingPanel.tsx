@@ -27,15 +27,23 @@ export default function BookingPanel({ campsite }: { campsite: Campsite }) {
     return `/go/${campsite.id}${qs ? `?${qs}` : ""}`;
   }, [campsite.id, checkin, checkout, guests]);
 
+  const hasPrice = campsite.priceEstimate.low > 0 || campsite.priceEstimate.high > 0;
+
   return (
     <div className="rounded-2xl bg-white p-5 shadow-sm ring-1 ring-forest-900/8">
       <div className="flex items-baseline justify-between">
         <div>
           <span className="text-[11px] uppercase tracking-wide text-ink-500">
-            {campsite.hasLivePricing ? "Estimated / night" : "From (estimate only)"}
+            {hasPrice
+              ? campsite.hasLivePricing
+                ? "Estimated / night"
+                : "From (estimate only)"
+              : "Price"}
           </span>
           <div className="font-display text-2xl font-semibold text-forest-700">
-            {formatPriceBand(campsite.priceEstimate.low, campsite.priceEstimate.high)}
+            {hasPrice
+              ? formatPriceBand(campsite.priceEstimate.low, campsite.priceEstimate.high)
+              : "Check on site"}
           </div>
         </div>
       </div>
@@ -78,7 +86,7 @@ export default function BookingPanel({ campsite }: { campsite: Campsite }) {
         </label>
       </div>
 
-      {nights > 0 && (
+      {hasPrice && nights > 0 && (
         <div className="mt-4 flex items-center justify-between border-t border-forest-900/10 pt-3 text-sm">
           <span className="text-ink-500">
             {formatPriceBand(campsite.priceEstimate.low, campsite.priceEstimate.high)} ×{" "}

@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { MapPin } from "lucide-react";
+import { MapPin, ImageOff } from "lucide-react";
 import type { Campsite } from "@/lib/types";
 import { amenityMeta, formatPriceBand } from "@/lib/display";
 import RatingStars from "./RatingStars";
@@ -32,13 +32,20 @@ export default function CampsiteCard({
           isRow ? "h-44 sm:h-auto sm:w-64 sm:shrink-0" : "h-48 w-full"
         }`}
       >
-        <Image
-          src={campsite.heroImage}
-          alt={campsite.name}
-          fill
-          className="object-cover transition-transform duration-500 group-hover:scale-105"
-          sizes={isRow ? "256px" : "(min-width: 1024px) 320px, 100vw"}
-        />
+        {campsite.heroImage ? (
+          <Image
+            src={campsite.heroImage}
+            alt={campsite.name}
+            fill
+            unoptimized
+            className="object-cover transition-transform duration-500 group-hover:scale-105"
+            sizes={isRow ? "256px" : "(min-width: 1024px) 320px, 100vw"}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center bg-sand-100 text-ink-300">
+            <ImageOff className="h-6 w-6" />
+          </div>
+        )}
         {!campsite.hasLivePricing && (
           <span className="absolute left-3 top-3 rounded-full bg-forest-900/80 px-2.5 py-1 text-[11px] font-semibold text-sand-50">
             Estimate only
@@ -54,16 +61,16 @@ export default function CampsiteCard({
           <RatingStars rating={campsite.rating} />
         </div>
 
-        <div className="flex items-center gap-1 text-sm text-ink-500">
-          <MapPin className="h-3.5 w-3.5" />
-          <span>
-            {campsite.region}, {campsite.country}
-          </span>
-        </div>
+        {(campsite.region || campsite.country) && (
+          <div className="flex items-center gap-1 text-sm text-ink-500">
+            <MapPin className="h-3.5 w-3.5" />
+            <span>{[campsite.region, campsite.country].filter(Boolean).join(", ")}</span>
+          </div>
+        )}
 
-        <p className="line-clamp-2 text-sm text-ink-500">
-          {campsite.description}
-        </p>
+        {campsite.description && (
+          <p className="line-clamp-2 text-sm text-ink-500">{campsite.description}</p>
+        )}
 
         <div className="mt-1 flex flex-wrap gap-2">
           {campsite.amenities.slice(0, 4).map((a) => {
@@ -84,12 +91,18 @@ export default function CampsiteCard({
 
         <div className="mt-auto flex items-end justify-between pt-3">
           <div>
-            <div className="text-[11px] uppercase tracking-wide text-ink-500">
-              Estimated / night
-            </div>
-            <div className="font-display text-lg font-semibold text-forest-700">
-              {formatPriceBand(campsite.priceEstimate.low, campsite.priceEstimate.high)}
-            </div>
+            {campsite.priceEstimate.low > 0 || campsite.priceEstimate.high > 0 ? (
+              <>
+                <div className="text-[11px] uppercase tracking-wide text-ink-500">
+                  Estimated / night
+                </div>
+                <div className="font-display text-lg font-semibold text-forest-700">
+                  {formatPriceBand(campsite.priceEstimate.low, campsite.priceEstimate.high)}
+                </div>
+              </>
+            ) : (
+              <div className="text-sm font-medium text-ink-500">Check price on site</div>
+            )}
           </div>
           <span className="rounded-full bg-forest-600 px-3 py-1.5 text-xs font-semibold text-sand-50 transition-colors group-hover:bg-forest-700">
             View &amp; book →
