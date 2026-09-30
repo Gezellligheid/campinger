@@ -164,6 +164,8 @@ export function normalizeLodgingNode(
   node: Record<string, unknown>,
   sourceUrl: string,
   dataSource: string,
+  guidePriceEstimate?: { low: number; high: number; currency: string } | null,
+  bookingUrlOverride?: string | null,
 ): ScrapedCampsite | null {
   const name = str(node["name"]);
   if (!name) return null; // unusable without a name
@@ -172,16 +174,19 @@ export function normalizeLodgingNode(
   const geo = (node["geo"] as Record<string, unknown>) ?? {};
   const scrapedAt = new Date().toISOString();
   const image = firstOf(node["image"] as string | string[] | undefined);
-  const bookingUrl = str(node["url"]) ?? sourceUrl;
+  const bookingUrl = bookingUrlOverride ?? str(node["url"]) ?? sourceUrl;
   const priceSnapshots = extractOffers(node, scrapedAt);
   const { rating, reviewCount } = extractRating(node);
 
   // Real structured offers win when present (hasLivePricing: true). With
-  // none, fall back to parsing the coarser `priceRange` text field — that's
-  // still just a parsed estimate, not a live quote, so hasLivePricing stays
-  // false for it even though we now have *a* number to show.
+  // none, fall back to a site-specific guide price (e.g. eurocampings.nl's
+  // "Richtprijs" — a real numeric per-night rate, just not a live quote),
+  // then to parsing the coarser `priceRange` text field. Both fallbacks are
+  // still just estimates, not live quotes, so hasLivePricing stays false
+  // for them even though we now have *a* number to show.
   const derived = derivePriceEstimate(priceSnapshots);
-  const priceEstimate = derived.priceEstimate ?? parsePriceRangeText(str(node["priceRange"]) ?? "");
+  const priceEstimate =
+    derived.priceEstimate ?? guidePriceEstimate ?? parsePriceRangeText(str(node["priceRange"]) ?? "");
   const hasLivePricing = derived.hasLivePricing;
 
   return {

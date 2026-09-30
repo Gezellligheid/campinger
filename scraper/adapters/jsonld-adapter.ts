@@ -1,5 +1,6 @@
 import { politeFetch, RobotsDisallowedError } from "../lib/politeFetch";
 import { extractLodgingNodes } from "../lib/jsonld";
+import { buildEurocampingsBookingUrl, extractEurocampingsGuidePrice } from "../lib/eurocampings";
 import { normalizeLodgingNode } from "../lib/normalize";
 import type { AdapterResult, ScrapedCampsite, SourceAdapter, SourceConfig } from "../types";
 
@@ -54,7 +55,9 @@ export async function fetchAndExtractOne(
   }
 
   const merged = mergeNodes(nodes);
-  const record = normalizeLodgingNode(merged, url, dataSource);
+  const guidePrice = extractEurocampingsGuidePrice(html);
+  const bookingUrlOverride = buildEurocampingsBookingUrl(url);
+  const record = normalizeLodgingNode(merged, url, dataSource, guidePrice, bookingUrlOverride);
   if (!record) {
     return { record: null, issue: `found JSON-LD nodes but none had a usable name on ${url}` };
   }
