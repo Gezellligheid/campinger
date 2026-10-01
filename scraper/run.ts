@@ -100,10 +100,7 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
       attemptedIds.push(entry.id);
       try {
         const { record, issue } = await fetchAndExtractOne(entry.url, dataSource);
-        if (record) {
-          records.push(record);
-          await incrementScrapedCount(focus.country, entry.region, entry.town);
-        }
+        if (record) records.push(record);
         if (issue) console.warn(`  [focus:${focus.country}] ${issue}`);
       } catch (err) {
         const message =
@@ -111,6 +108,15 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
             ? err.message
             : `fetch failed for ${entry.url}: ${err instanceof Error ? err.message : String(err)}`;
         console.warn(`  [focus:${focus.country}] ${message}`);
+      } finally {
+        // Count every *attempt* toward the town's scrapedCount, not just
+        // successes — markIndexEntriesScraped below marks this URL scraped
+        // (never retried) either way, so a dead link/no-JSON-LD page that
+        // only incremented on success would permanently inflate its town's
+        // placeholder count: counted in totalCount forever, never
+        // subtracted, so the placeholder could never reach zero even once
+        // every *scrapable* campsite in that town succeeded.
+        await incrementScrapedCount(focus.country, entry.region, entry.town);
       }
     }
     // Mark every attempted URL scraped regardless of outcome — a dead/broken
