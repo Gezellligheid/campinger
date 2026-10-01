@@ -30,46 +30,37 @@ export function extractEurocampingsGuidePrice(
   return { low: Math.min(...prices), high: Math.max(...prices), currency: "EUR" };
 }
 
-const EUROCAMPINGS_HOST_RE = /(^|\.)eurocampings\.(nl|co\.uk)$/;
-
 /**
- * eurocampings.nl detail URLs end in `<slug>-<numeric id>/`
- * (e.g. `camping-17-duinzicht-113225/`) — pull that id out so we can
- * construct the same outbound link eurocampings.nl's own "Bezoek
- * campingwebsite" button uses, without fetching the page a second time.
- * Scoped to eurocampings.nl/.co.uk hosts so it can't misfire on some other
- * source's URL that happens to end in digits.
+ * Pull the real `data-link` href off eurocampings.nl's own "Bezoek
+ * campingwebsite" button, when the page renders one at all — e.g.
+ * `data-link="https://cpc.acsi.eu/eurocampings/nl/cpc/out/113225/
+ * EXTERNALLINK_DETAIL_TOP/"`. This is the same ACSI cost-per-click redirect
+ * that resolves (via an ACSI/Eurocampings-branded interstitial) to the
+ * campsite's own real site, confirmed by hand 2026-10-01.
+ *
+ * Earlier this constructed that URL ourselves from the campsite id in the
+ * page URL, assuming it'd work for every campsite — it doesn't. Spot-
+ * checking by hand found a case (Floreal Gossaimont, id 117778 — no button
+ * shown on its own page) where the constructed link 404s on ACSI's side
+ * instead of redirecting anywhere. Scraping the literal `data-link` instead
+ * means we only ever offer this link when eurocampings.nl's own page
+ * vouches for it as clickable — not a guarantee every such link resolves,
+ * but strictly more conservative than guessing for every campsite.
+ *
+ * This is still the same `/cpc/out/` path eurocampings.nl's robots.txt
+ * disallows for crawlers (see sources.config.ts's compliance note), so the
+ * scraper itself never fetches or follows it — only extracts the href
+ * already sitting in HTML it fetched for other reasons, for a real
+ * visitor's browser to follow later. Routing the click through ACSI's own
+ * paid/tracked affiliate redirect (no agreement with them about it) is an
+ * accepted tradeoff — chat 2026-10-01.
  */
-export function extractEurocampingsCampsiteId(url: string): string | null {
-  let parsed: URL;
+export function extractEurocampingsBookingLink(html: string): string | null {
+  const match = html.match(/data-link="(https:\/\/cpc\.acsi\.eu\/[^"]+)"/);
+  if (!match) return null;
   try {
-    parsed = new URL(url);
+    return new URL(match[1]).toString();
   } catch {
     return null;
   }
-  if (!EUROCAMPINGS_HOST_RE.test(parsed.hostname)) return null;
-  const match = parsed.pathname.match(/-(\d+)\/?$/);
-  return match ? match[1] : null;
-}
-
-/**
- * Build the ACSI cost-per-click redirect that eurocampings.nl's own "Bezoek
- * campingwebsite" button links to — it resolves (via an ACSI/Eurocampings-
- * branded interstitial, confirmed by hand 2026-10-01) straight to the
- * campsite's real own site, e.g. camping-17-duinzicht-113225 ->
- * https://www.campingduinzicht.be/.
- *
- * This is the same `/cpc/out/` path eurocampings.nl's robots.txt disallows
- * for crawlers (see sources.config.ts's compliance note) — so the scraper
- * itself never fetches or follows it. This function only *constructs* the
- * URL from the campsite id (public in the page URL we already fetched) to
- * use as an href for a real visitor's browser to click, exactly how
- * eurocampings.nl uses it on its own page. Note this does route the click
- * through ACSI's own paid/tracked affiliate redirect, which we have no
- * agreement with them about — accepted tradeoff, chat 2026-10-01.
- */
-export function buildEurocampingsBookingUrl(sourceUrl: string): string | null {
-  const id = extractEurocampingsCampsiteId(sourceUrl);
-  if (!id) return null;
-  return `https://cpc.acsi.eu/eurocampings/nl/cpc/out/${id}/EXTERNALLINK_DETAIL_BOTTOM/`;
 }
