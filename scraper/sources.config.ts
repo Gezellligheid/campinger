@@ -123,9 +123,9 @@ export const sitemapIndexSources: SitemapIndexSource[] = [
  * (e.g. "belgie", not "belgium" or "Belgium").
  */
 export const focusedCountries: FocusedCountry[] = [
-  { country: "belgie", label: "Belgium", maxItems: 20 },
-  // France is the largest country in the sitemap (~2,865 entries) — at
-  // 20/run it'll take a long time to fully cover, but that's the
+  { country: "belgie", label: "Belgium", maxItems: 100 },
+  // France is the largest country in the sitemap (~2,865 entries) — even
+  // at 100/run it'll take a while to fully cover, but that's the
   // intentional politeness tradeoff (see the file-header note above).
-  { country: "frankrijk", label: "France", maxItems: 20 },
+  { country: "frankrijk", label: "France", maxItems: 100 },
 ];
