@@ -88,7 +88,19 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
 
   for (const focus of focusedCountries) {
     const dataSource = `eurocampings-focus-${focus.country}`;
-    const entries = await getFocusedCountryUrls(focus.country, focus.maxItems);
+    let entries: Awaited<ReturnType<typeof getFocusedCountryUrls>>;
+    try {
+      entries = await getFocusedCountryUrls(focus.country, focus.maxItems);
+    } catch (err) {
+      // Needs a composite index on (country, scraped) — Firestore's error
+      // message includes a one-click console link to create it. Skip this
+      // country rather than aborting the whole run (which would also lose
+      // the static sources' records collected earlier in run()).
+      console.warn(
+        `  [focus:${focus.country}] couldn't query indexed URLs: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      continue;
+    }
     if (entries.length === 0) {
       console.log(`  [focus:${focus.country}] nothing indexed-but-unscraped left`);
       continue;

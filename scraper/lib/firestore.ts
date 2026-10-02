@@ -1,5 +1,5 @@
 import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getFirestore } from "firebase-admin/firestore";
+import { FieldValue, getFirestore } from "firebase-admin/firestore";
 import type { AdapterResult, ScrapedCampsite, SourceAdapterHealth } from "../types";
 import { townSlug, type SitemapIndexEntry } from "./sitemapIndex";
 import { geocodeTown } from "./geocode";
@@ -89,30 +89,52 @@ function slugFromUrl(url: string): string {
   return segments[segments.length - 1] ?? url;
 }
 
+const INDEX_META_COLLECTION = "campsite_index_meta";
+const KNOWN_IDS_DOC = "known_ids";
+
 /**
  * Cheap-discovery / expensive-scrape split (per the "focus" design): record
  * every URL a sitemap lists, tagged with country/region, WITHOUT visiting
  * any of them yet. Entries already in the index are left untouched (no
  * write at all) so this never resets an entry's `scraped` progress — only
  * genuinely new URLs get created, with `scraped: false`.
+ *
+ * Membership ("is this URL already indexed?") is checked against a single
+ * manifest doc (`campsite_index_meta/known_ids`, one `ids` array field)
+ * instead of querying `campsite_index` itself. The previous approach ran
+ * one `.where("country","==",country).select().get()` per distinct country
+ * in the sitemap (effectively every country eurocampings.nl covers) — since
+ * nearly everything is already indexed after the first run, that re-read
+ * close to the *entire* collection, every single run, growing without
+ * bound (~9,700+ reads/run once fully indexed). Reading one manifest doc
+ * instead is O(1) regardless of index size.
  */
 export async function upsertSitemapIndex(
   entries: SitemapIndexEntry[],
 ): Promise<{ added: number; skipped: number; addedEntries: SitemapIndexEntry[] }> {
   const db = getDb();
   const collection = db.collection(INDEX_COLLECTION);
+  const metaRef = db.collection(INDEX_META_COLLECTION).doc(KNOWN_IDS_DOC);
 
-  const countries = [...new Set(entries.map((e) => e.country))];
-  const existingIds = new Set<string>();
-  for (const country of countries) {
-    const snap = await collection.where("country", "==", country).select().get();
-    snap.docs.forEach((d) => existingIds.add(d.id));
+  const metaDoc = await metaRef.get();
+  let knownIds: Set<string>;
+  if (metaDoc.exists) {
+    knownIds = new Set<string>((metaDoc.data()?.["ids"] as string[] | undefined) ?? []);
+  } else {
+    // First run after this manifest existed: seed it from whatever's
+    // already in campsite_index so we don't treat already-indexed entries
+    // as new (which would reset their `scraped` progress). One-time cost —
+    // every run after this one only reads the manifest doc.
+    const fullSnap = await collection.select().get();
+    knownIds = new Set(fullSnap.docs.map((d) => d.id));
+    await metaRef.set({ ids: [...knownIds] });
   }
 
   const discoveredAt = new Date().toISOString();
   let batch = db.batch();
   let opsInBatch = 0;
   const addedEntries: SitemapIndexEntry[] = [];
+  const addedIds: string[] = [];
 
   const flushIfNeeded = async () => {
     if (opsInBatch >= 400) {
@@ -124,13 +146,21 @@ export async function upsertSitemapIndex(
 
   for (const entry of entries) {
     const id = slugFromUrl(entry.url);
-    if (existingIds.has(id)) continue;
+    if (knownIds.has(id)) continue;
     batch.set(collection.doc(id), { ...entry, scraped: false, discoveredAt });
     addedEntries.push(entry);
+    addedIds.push(id);
     opsInBatch++;
     await flushIfNeeded();
   }
   if (opsInBatch > 0) await batch.commit();
+
+  if (addedIds.length > 0) {
+    // Comfortably under Firestore's 1MiB doc limit at today's scale (~9.7k
+    // ids * ~30 chars ~= 290KB) — revisit (shard by country, say) if the
+    // index grows past roughly 25-30k entries.
+    await metaRef.set({ ids: FieldValue.arrayUnion(...addedIds) }, { merge: true });
+  }
 
   return { added: addedEntries.length, skipped: entries.length - addedEntries.length, addedEntries };
 }
@@ -224,19 +254,26 @@ export async function incrementScrapedCount(
 }
 
 /**
- * Up to `limit` not-yet-scraped indexed URLs for one country. Filters
- * `scraped === false` in JS rather than as a second `where()` clause to
- * avoid requiring a manual composite-index setup in the Firebase console
- * for what's a low-volume, infrequent query.
+ * Up to `limit` not-yet-scraped indexed URLs for one country. Used to read
+ * every doc for the country (often thousands, e.g. ~2,865 for France) and
+ * filter `scraped === false` in JS to dodge a composite-index requirement —
+ * that meant reading the whole country's index every run no matter how
+ * small `limit` is. Querying `scraped` directly needs a composite index on
+ * (country, scraped); Firestore will print a one-click console link to
+ * create it the first time this runs without one.
  */
 export async function getFocusedCountryUrls(
   country: string,
   limit: number,
 ): Promise<{ id: string; url: string; region: string | null; town: string | null }[]> {
   const db = getDb();
-  const snap = await db.collection(INDEX_COLLECTION).where("country", "==", country).get();
-  const unscraped = snap.docs.filter((d) => d.data()["scraped"] === false);
-  return unscraped.slice(0, limit).map((d) => {
+  const snap = await db
+    .collection(INDEX_COLLECTION)
+    .where("country", "==", country)
+    .where("scraped", "==", false)
+    .limit(limit)
+    .get();
+  return snap.docs.map((d) => {
     const data = d.data();
     return {
       id: d.id,
