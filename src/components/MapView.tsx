@@ -5,7 +5,6 @@ import {
   Map as MapLibreMap,
   Marker,
   NavigationControl,
-  LngLatBounds,
   type GeoJSONSource,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -228,8 +227,15 @@ export default function MapView({
     };
   }, []);
 
-  // Push the full dataset into the clustering source and fit bounds
-  // whenever the filtered campsite list changes.
+  // Push the dataset into the clustering source whenever it changes.
+  //
+  // This used to also call map.fitBounds() to frame the data — fine when
+  // `campsites` was the whole catalog, loaded once. Now that campsites are
+  // fetched *for the current viewport* (see SearchResults.tsx), that
+  // created a feedback loop: moving the map re-fetches campsites for the
+  // new viewport -> campsites prop changes -> fitBounds moves the map
+  // again -> refetch again, indefinitely. The camera drives the data now,
+  // not the other way around, so the data must never move the camera.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
@@ -239,13 +245,6 @@ export default function MapView({
 
     const placeholderSource = map.getSource(PLACEHOLDER_SOURCE_ID) as GeoJSONSource | undefined;
     if (placeholderSource) placeholderSource.setData(toPlaceholderFeatureCollection(placeholders));
-
-    if (campsites.length > 0 || placeholders.length > 0) {
-      const bounds = new LngLatBounds();
-      campsites.forEach((c) => bounds.extend([c.lng, c.lat]));
-      placeholders.forEach((p) => bounds.extend([p.lng, p.lat]));
-      map.fitBounds(bounds, { padding: 64, maxZoom: 9, duration: 400 });
-    }
   }, [campsites, placeholders, ready]);
 
   // Custom DOM price-pill markers only for points NOT currently folded into

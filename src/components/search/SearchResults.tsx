@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { SlidersHorizontal, X } from "lucide-react";
-import { fetchCampsites } from "@/lib/campsites";
-import { fetchTownAggregates, type TownAggregate } from "@/lib/townAggregates";
+import { fetchCampsitesInBounds } from "@/lib/campsites";
+import { fetchTownAggregatesInBounds, type TownAggregate } from "@/lib/townAggregates";
 import type { Campsite } from "@/lib/types";
 import SearchBar from "@/components/SearchBar";
 import CampsiteCard from "@/components/CampsiteCard";
@@ -22,6 +22,13 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 
 type SortKey = "price-asc" | "rating-desc" | "popularity-desc";
 
+// Each map move now triggers a real Firestore query (not a client-side
+// filter over an already-loaded dataset), so wait for the map to settle
+// before refetching rather than querying on every intermediate pan/zoom
+// tick — see fetchCampsitesInBounds's doc comment for why this moved away
+// from loading the whole collection up front.
+const BOUNDS_FETCH_DEBOUNCE_MS = 400;
+
 export default function SearchResults({
   location,
   collection,
@@ -34,39 +41,48 @@ export default function SearchResults({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [mobileView, setMobileView] = useState<"list" | "map">("list");
-  const [allCampsites, setAllCampsites] = useState<Campsite[] | null>(null);
+  const [campsitesInView, setCampsitesInView] = useState<Campsite[] | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [placeholders, setPlaceholders] = useState<TownAggregate[]>([]);
   const [viewportBounds, setViewportBounds] = useState<MapBounds | null>(null);
 
   useEffect(() => {
+    if (!viewportBounds) return;
     let cancelled = false;
-    fetchCampsites()
-      .then((data) => {
-        if (!cancelled) setAllCampsites(data);
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) {
-          setFetchError(err instanceof Error ? err.message : "Failed to load campsites");
-        }
-      });
-    // Best-effort: placeholder markers are a nice-to-have, not core
-    // functionality — a failure here shouldn't affect the rest of the page.
-    fetchTownAggregates()
-      .then((data) => {
-        if (!cancelled) setPlaceholders(data);
-      })
-      .catch(() => {});
+
+    const timer = setTimeout(() => {
+      fetchCampsitesInBounds(viewportBounds)
+        .then((data) => {
+          if (!cancelled) setCampsitesInView(data);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) {
+            setFetchError(err instanceof Error ? err.message : "Failed to load campsites");
+          }
+        });
+      // Best-effort: placeholder markers are a nice-to-have, not core
+      // functionality — a failure here shouldn't affect the rest of the page.
+      fetchTownAggregatesInBounds(viewportBounds)
+        .then((data) => {
+          if (!cancelled) setPlaceholders(data);
+        })
+        .catch(() => {});
+    }, BOUNDS_FETCH_DEBOUNCE_MS);
+
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
-  }, []);
+  }, [viewportBounds]);
 
   const base = useMemo(() => {
-    const source = allCampsites ?? [];
+    const source = campsitesInView ?? [];
     return collection ? source.filter((c) => c.collections.includes(collection)) : source;
-  }, [allCampsites, collection]);
+  }, [campsitesInView, collection]);
 
+  // location/price/amenities/etc. filters, applied on top of whatever's
+  // already been fetched for the current viewport — this list is
+  // inherently viewport-scoped now, not "every match anywhere."
   const filtered = useMemo(() => {
     const loc = location.trim().toLowerCase();
 
@@ -109,17 +125,6 @@ export default function SearchResults({
     return sorted;
   }, [base, location, filters, sort]);
 
-  // "Search as I move the map": once the map reports a viewport, the list
-  // only shows campsites currently on screen — panning/zooming the map
-  // updates the list, matching the Airbnb/Zillow pattern. Falls back to
-  // the full filtered list before the map has reported its first viewport
-  // (e.g. still loading) so the list isn't empty on initial paint.
-  const inViewport = useMemo(() => {
-    if (!viewportBounds) return filtered;
-    const { west, south, east, north } = viewportBounds;
-    return filtered.filter((c) => c.lng >= west && c.lng <= east && c.lat >= south && c.lat <= north);
-  }, [filtered, viewportBounds]);
-
   const filteredPlaceholders = useMemo(() => {
     const loc = location.trim().toLowerCase();
     if (!loc) return placeholders;
@@ -147,10 +152,10 @@ export default function SearchResults({
         <div className="hidden text-sm text-ink-500 lg:block">
           {fetchError
             ? "Couldn't load campsites"
-            : allCampsites === null
+            : campsitesInView === null
               ? "Loading campsites…"
-              : `${inViewport.length} campsite${inViewport.length === 1 ? "" : "s"} in this area`}
-          {!fetchError && allCampsites !== null && location && (
+              : `${filtered.length} campsite${filtered.length === 1 ? "" : "s"} in this area`}
+          {!fetchError && campsitesInView !== null && location && (
             <>
               {" "}
               near <span className="font-semibold text-ink-900">{location}</span>
@@ -209,34 +214,31 @@ export default function SearchResults({
               </p>
               <p className="mt-1 max-w-xs text-sm text-ink-500">{fetchError}</p>
             </div>
-          ) : allCampsites === null ? (
+          ) : campsitesInView === null ? (
             <div className="flex h-64 flex-col items-center justify-center rounded-2xl bg-white text-center ring-1 ring-forest-900/5">
               <p className="text-sm text-ink-500">Loading campsites…</p>
             </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex h-64 flex-col items-center justify-center rounded-2xl bg-white text-center ring-1 ring-forest-900/5">
-              <p className="font-display text-lg font-semibold text-ink-900">
-                {allCampsites.length === 0 ? "No campsites yet" : "No campsites match yet"}
-              </p>
-              <p className="mt-1 max-w-xs text-sm text-ink-500">
-                {allCampsites.length === 0
-                  ? "Check back soon — we're still building out the catalog."
-                  : "Try widening your price range or clearing a filter."}
-              </p>
-            </div>
-          ) : inViewport.length === 0 ? (
+          ) : campsitesInView.length === 0 ? (
             <div className="flex h-64 flex-col items-center justify-center rounded-2xl bg-white text-center ring-1 ring-forest-900/5">
               <p className="font-display text-lg font-semibold text-ink-900">
                 No campsites in this area
               </p>
               <p className="mt-1 max-w-xs text-sm text-ink-500">
-                Pan or zoom out on the map to see more — {filtered.length} match your filters
-                elsewhere.
+                Try panning or zooming out on the map to see more.
+              </p>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="flex h-64 flex-col items-center justify-center rounded-2xl bg-white text-center ring-1 ring-forest-900/5">
+              <p className="font-display text-lg font-semibold text-ink-900">
+                No campsites match yet
+              </p>
+              <p className="mt-1 max-w-xs text-sm text-ink-500">
+                Try widening your price range or clearing a filter.
               </p>
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-              {inViewport.map((c) => (
+              {filtered.map((c) => (
                 <CampsiteCard
                   key={c.id}
                   campsite={c}

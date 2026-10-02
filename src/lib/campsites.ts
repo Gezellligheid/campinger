@@ -45,6 +45,44 @@ function normalizeCampsite(id: string, data: DocumentData): Campsite {
   };
 }
 
+export interface LatLngBounds {
+  west: number;
+  south: number;
+  east: number;
+  north: number;
+}
+
+/**
+ * Campsites within a map viewport, not the whole collection. Firestore
+ * can't range-filter two different fields (lat AND lng) in one query — only
+ * a single field's range is allowed without a geo-indexing scheme (e.g.
+ * geohashing), which is more machinery than this needs right now. So this
+ * queries the latitude band server-side (cheap: single-field range queries
+ * don't need a manual composite index) and filters longitude client-side on
+ * that already-small result. A viewport spanning the full lat range of a
+ * continent still over-fetches somewhat, but it's nowhere near "every
+ * campsite on the site" — see fetchCampsites() below for why that mattered.
+ */
+export async function fetchCampsitesInBounds(bounds: LatLngBounds): Promise<Campsite[]> {
+  const q = query(
+    collection(db, COLLECTION),
+    where("lat", ">=", bounds.south),
+    where("lat", "<=", bounds.north),
+  );
+  const snap = await getDocs(q);
+  return snap.docs
+    .map((d) => normalizeCampsite(d.id, d.data()))
+    .filter((c) => c.lng >= bounds.west && c.lng <= bounds.east);
+}
+
+/**
+ * Every campsite, no bounds — only for callers that genuinely need the
+ * whole catalog (e.g. a sitemap or an admin view). Prefer
+ * fetchCampsitesInBounds for anything rendering a map/list: fetching the
+ * full collection on every page view is what blew through Firestore's free
+ * daily read quota in the first place (every visitor re-reading every
+ * campsite, regardless of what's actually on screen).
+ */
 export async function fetchCampsites(): Promise<Campsite[]> {
   const snap = await getDocs(collection(db, COLLECTION));
   return snap.docs.map((d) => normalizeCampsite(d.id, d.data()));
