@@ -30,14 +30,23 @@ export class RobotsDisallowedError extends Error {
   }
 }
 
+const FETCH_TIMEOUT_MS = 15000;
+
 /**
  * fetch() wrapper that enforces robots.txt and a per-host politeness delay.
  * Every adapter must route outbound requests through this, not raw fetch.
+ * Timeout matters more now than it used to: OSM's image-fetch step
+ * (scraper/lib/images.ts) hits hundreds of arbitrary third-party campsite
+ * websites per run, not just a handful of manually-reviewed sources — a
+ * single slow/hanging one shouldn't stall the whole run.
  */
 export async function politeFetch(url: string): Promise<Response> {
   if (!(await isAllowedByRobots(url, USER_AGENT))) {
     throw new RobotsDisallowedError(url);
   }
   await waitForTurn(hostOf(url));
-  return fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  return fetch(url, {
+    headers: { "User-Agent": USER_AGENT },
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
 }

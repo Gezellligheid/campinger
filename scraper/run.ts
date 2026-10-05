@@ -157,6 +157,34 @@ function shuffleInPlace<T>(arr: T[]): void {
 }
 
 /**
+ * Some malformed/abruptly-closed HTTP responses make Node's built-in fetch
+ * (undici) throw an assertion error from inside a raw socket event handler
+ * (`Parser.finish` / `TLSSocket.onHttpSocketEnd`) instead of rejecting the
+ * fetch promise normally — a known undici issue, not something a plain
+ * try/catch around the fetch call can catch, since it isn't delivered as
+ * that promise's rejection. Hitting hundreds of arbitrary third-party
+ * campsite websites per run (not a handful of manually-reviewed sources)
+ * makes this a question of when, not if. Scoped tightly around just the
+ * image-fetch loop — restored immediately after — so a genuine bug
+ * elsewhere in the script still crashes loudly as it should.
+ */
+function installFetchCrashGuard(): () => void {
+  const handler = (err: unknown) => {
+    console.warn(
+      `  [osm] swallowed a process-level fetch error (likely a misbehaving server — ` +
+        `known Node/undici issue, not a bug in this scraper): ` +
+        `${err instanceof Error ? err.message : String(err)}`,
+    );
+  };
+  process.on("uncaughtException", handler);
+  process.on("unhandledRejection", handler);
+  return () => {
+    process.off("uncaughtException", handler);
+    process.off("unhandledRejection", handler);
+  };
+}
+
+/**
  * One Overpass query per configured country, normalized straight to full
  * records — no index/focus staging needed (see OsmCountry's doc comment).
  * Doesn't touch Firestore at all; just returns records for run() to write
@@ -202,20 +230,35 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
       `website-having campsite(s) this run...`,
   );
   let withImages = 0;
-  for (const record of toFetch) {
-    try {
-      const images = await fetchPreviewImages(record.bookingUrl);
-      if (images.length > 0) {
-        record.heroImage = images[0];
-        record.gallery = images;
-        withImages++;
+  const uninstallCrashGuard = installFetchCrashGuard();
+  try {
+    for (const record of toFetch) {
+      try {
+        // Belt and suspenders alongside politeFetch's own AbortSignal
+        // timeout and the crash guard above: if the undici bug those guard
+        // against ever leaves this await genuinely stuck rather than
+        // rejecting, this timeout still lets the loop move on to the next
+        // record instead of hanging the whole run on one website.
+        const images = await Promise.race([
+          fetchPreviewImages(record.bookingUrl),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error("image fetch timed out")), 20000),
+          ),
+        ]);
+        if (images.length > 0) {
+          record.heroImage = images[0];
+          record.gallery = images;
+          withImages++;
+        }
+      } catch (err) {
+        console.warn(
+          `  [osm] image fetch failed for ${record.bookingUrl}: ` +
+            `${err instanceof Error ? err.message : String(err)}`,
+        );
       }
-    } catch (err) {
-      console.warn(
-        `  [osm] image fetch failed for ${record.bookingUrl}: ` +
-          `${err instanceof Error ? err.message : String(err)}`,
-      );
     }
+  } finally {
+    uninstallCrashGuard();
   }
   console.log(`  [osm] ${withImages}/${toFetch.length} campsite(s) got photos this run`);
 
