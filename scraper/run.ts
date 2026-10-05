@@ -14,6 +14,7 @@ import {
   writeAdapterHealthToFirestore,
   writeRecordsToFirestore,
 } from "./lib/firestore";
+import { fetchPreviewImages } from "./lib/images";
 import { fetchOsmCampsites, normalizeOsmElement } from "./lib/osm";
 import { politeFetch, RobotsDisallowedError } from "./lib/politeFetch";
 import { extractSitemapUrls } from "./lib/sitemap";
@@ -156,17 +157,41 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
     try {
       const elements = await fetchOsmCampsites(countryCode);
       let skipped = 0;
+      let withImages = 0;
       for (const element of elements) {
         const record = normalizeOsmElement(element, label);
-        if (record && record.lat !== null && record.lng !== null) {
-          records.push(record);
-        } else {
+        if (!record || record.lat === null || record.lng === null) {
           skipped++;
+          continue;
         }
+
+        // Only campsites with a real website (not the OSM fallback link
+        // normalizeOsmElement sets bookingUrl to) are worth fetching — OSM
+        // itself has no campsite photos. Best-effort: a site that's slow,
+        // disallows crawling, or errors just leaves this record photo-less
+        // rather than failing the whole run.
+        if (record.bookingUrl !== record.sourceUrl) {
+          try {
+            const images = await fetchPreviewImages(record.bookingUrl);
+            if (images.length > 0) {
+              record.heroImage = images[0];
+              record.gallery = images;
+              withImages++;
+            }
+          } catch (err) {
+            console.warn(
+              `  [osm:${countryCode}] image fetch failed for ${record.bookingUrl}: ` +
+                `${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+
+        records.push(record);
       }
       console.log(
         `  [osm:${countryCode}] ${elements.length} element(s) from Overpass, ` +
-          `${elements.length - skipped} usable record(s), ${skipped} skipped (no name/coords)`,
+          `${elements.length - skipped} usable record(s), ${skipped} skipped (no name/coords), ` +
+          `${withImages} with photos found`,
       );
     } catch (err) {
       console.warn(`  [osm:${countryCode}] ${err instanceof Error ? err.message : String(err)}`);
