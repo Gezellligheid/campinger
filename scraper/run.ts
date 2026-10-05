@@ -14,10 +14,11 @@ import {
   writeAdapterHealthToFirestore,
   writeRecordsToFirestore,
 } from "./lib/firestore";
+import { fetchOsmCampsites, normalizeOsmElement } from "./lib/osm";
 import { politeFetch, RobotsDisallowedError } from "./lib/politeFetch";
 import { extractSitemapUrls } from "./lib/sitemap";
 import { parseEurocampingsEntry } from "./lib/sitemapIndex";
-import { focusedCountries, sitemapIndexSources, sources } from "./sources.config";
+import { focusedCountries, osmCountries, sitemapIndexSources, sources } from "./sources.config";
 import type { AdapterResult, ScrapedCampsite, SourceAdapter, SourceAdapterHealth } from "./types";
 
 const adaptersById: Record<string, SourceAdapter> = {
@@ -140,8 +141,48 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
   return records;
 }
 
+/**
+ * One Overpass query per configured country, normalized straight to full
+ * records — no index/focus staging needed (see OsmCountry's doc comment).
+ * Doesn't touch Firestore at all; just returns records for run() to write
+ * alongside everything else. A failure for one country (e.g. Overpass
+ * timeout) is logged and skipped rather than aborting the whole run.
+ */
+async function runOsmCountries(): Promise<ScrapedCampsite[]> {
+  const records: ScrapedCampsite[] = [];
+
+  for (const { countryCode, label } of osmCountries) {
+    console.log(`  [osm:${countryCode}] querying Overpass...`);
+    try {
+      const elements = await fetchOsmCampsites(countryCode);
+      let skipped = 0;
+      for (const element of elements) {
+        const record = normalizeOsmElement(element, label);
+        if (record && record.lat !== null && record.lng !== null) {
+          records.push(record);
+        } else {
+          skipped++;
+        }
+      }
+      console.log(
+        `  [osm:${countryCode}] ${elements.length} element(s) from Overpass, ` +
+          `${elements.length - skipped} usable record(s), ${skipped} skipped (no name/coords)`,
+      );
+    } catch (err) {
+      console.warn(`  [osm:${countryCode}] ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return records;
+}
+
 async function run(): Promise<void> {
-  if (sources.length === 0 && sitemapIndexSources.length === 0 && focusedCountries.length === 0) {
+  if (
+    sources.length === 0 &&
+    sitemapIndexSources.length === 0 &&
+    focusedCountries.length === 0 &&
+    osmCountries.length === 0
+  ) {
     console.log(
       "No sources configured in scraper/sources.config.ts yet — nothing to scrape.\n" +
         "Add reviewed, robots.txt/ToS-compliant sources there first (see the file's header comment).",
@@ -173,7 +214,14 @@ async function run(): Promise<void> {
   console.log("Scraping focused countries...");
   const focusedRecords = await runFocusedCountries();
 
-  const allRecords: ScrapedCampsite[] = [...results.flatMap((r) => r.records), ...focusedRecords];
+  console.log("Fetching OpenStreetMap campsites...");
+  const osmRecords = await runOsmCountries();
+
+  const allRecords: ScrapedCampsite[] = [
+    ...results.flatMap((r) => r.records),
+    ...focusedRecords,
+    ...osmRecords,
+  ];
   const health: SourceAdapterHealth[] = results.map((r) => ({
     sourceId: r.sourceId,
     adapter: r.adapter,

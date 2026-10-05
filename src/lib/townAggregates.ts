@@ -1,6 +1,6 @@
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "./firebase";
-import type { LatLngBounds } from "./campsites";
+import { ONLY_SHOW_OSM, type LatLngBounds } from "./campsites";
 
 /**
  * A town-level placeholder for campsites the scraper knows exist (from a
@@ -42,8 +42,17 @@ function normalizeTownAggregate(id: string, data: Record<string, unknown>): Town
  * Town placeholders within a map viewport — see fetchCampsitesInBounds's
  * comment on why this is a latitude-band server-side query plus a
  * longitude client-side filter rather than a true bounding-box query.
+ *
+ * Every town_aggregates entry today comes from the eurocampings index/focus
+ * pipeline — OSM campsites are fetched as complete records directly (see
+ * scraper/lib/osm.ts), no "known but not yet scraped" placeholder stage.
+ * So while ONLY_SHOW_OSM is on, placeholders are entirely "our own data"
+ * too — skip the query and return nothing rather than show a stale/
+ * inconsistent placeholder for a catalog that isn't being displayed.
  */
 export async function fetchTownAggregatesInBounds(bounds: LatLngBounds): Promise<TownAggregate[]> {
+  if (ONLY_SHOW_OSM) return [];
+
   const q = query(
     collection(db, "town_aggregates"),
     where("lat", ">=", bounds.south),
@@ -57,6 +66,8 @@ export async function fetchTownAggregatesInBounds(bounds: LatLngBounds): Promise
 
 /** Every town aggregate, no bounds — see fetchCampsites's equivalent note. */
 export async function fetchTownAggregates(): Promise<TownAggregate[]> {
+  if (ONLY_SHOW_OSM) return [];
+
   const snap = await getDocs(collection(db, "town_aggregates"));
   return snap.docs
     .map((d) => normalizeTownAggregate(d.id, d.data()))

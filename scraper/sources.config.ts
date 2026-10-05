@@ -1,4 +1,4 @@
-import type { FocusedCountry, SitemapIndexSource, SourceConfig } from "./types";
+import type { FocusedCountry, OsmCountry, SitemapIndexSource, SourceConfig } from "./types";
 
 /**
  * Sources the scraper is allowed to hit.
@@ -128,4 +128,18 @@ export const focusedCountries: FocusedCountry[] = [
   // at 100/run it'll take a while to fully cover, but that's the
   // intentional politeness tradeoff (see the file-header note above).
   { country: "frankrijk", label: "France", maxItems: 100 },
+];
+
+/**
+ * Countries to pull OpenStreetMap campsite data for (scraper/lib/osm.ts) —
+ * the trial alternative to scraping eurocampings.nl: ODbL-licensed, meant
+ * for reuse, one query per country instead of thousands of page fetches.
+ * Same two countries as focusedCountries above for a direct comparison.
+ * The frontend is currently filtered to show ONLY `dataSource: "osm"`
+ * records (see ONLY_SHOW_OSM in src/lib/campsites.ts) while this is being
+ * evaluated — flip that back to show everything once a decision is made.
+ */
+export const osmCountries: OsmCountry[] = [
+  { countryCode: "BE", label: "Belgium" },
+  { countryCode: "FR", label: "France" },
 ];

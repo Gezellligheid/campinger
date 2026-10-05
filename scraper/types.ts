@@ -153,3 +153,15 @@ export interface SourceAdapter {
   id: string;
   fetchListing(source: SourceConfig): Promise<AdapterResult>;
 }
+
+/**
+ * A country to pull full OpenStreetMap campsite data for, via one Overpass
+ * API query per run (see scraper/lib/osm.ts) — no index/focus split needed
+ * here since a single query already returns real, complete records for the
+ * whole country, not just discovered-but-unvisited URLs.
+ */
+export interface OsmCountry {
+  /** ISO 3166-1 alpha-2 code, matching OSM's own `ISO3166-1` area tag. */
+  countryCode: string;
+  label: string;
+}

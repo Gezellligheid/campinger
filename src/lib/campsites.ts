@@ -13,6 +13,15 @@ import type { Campsite } from "./types";
 const COLLECTION = "campsites";
 
 /**
+ * Trial mode: show only OpenStreetMap-sourced campsites (dataSource "osm")
+ * on the site, hiding the existing eurocampings-scraped catalog — not
+ * deleted, just not displayed, while OSM is evaluated as a lower-risk
+ * alternative data source (see scraper/lib/osm.ts). Flip back to false once
+ * a decision is made.
+ */
+export const ONLY_SHOW_OSM = true;
+
+/**
  * Firestore docs come from an external scraper pipeline we don't control the
  * exact shape of — every field is defensively defaulted so a partially
  * populated or differently-shaped doc still renders instead of crashing the
@@ -71,6 +80,7 @@ export async function fetchCampsitesInBounds(bounds: LatLngBounds): Promise<Camp
   );
   const snap = await getDocs(q);
   return snap.docs
+    .filter((d) => !ONLY_SHOW_OSM || d.data().dataSource === "osm")
     .map((d) => normalizeCampsite(d.id, d.data()))
     .filter((c) => c.lng >= bounds.west && c.lng <= bounds.east);
 }
@@ -85,7 +95,9 @@ export async function fetchCampsitesInBounds(bounds: LatLngBounds): Promise<Camp
  */
 export async function fetchCampsites(): Promise<Campsite[]> {
   const snap = await getDocs(collection(db, COLLECTION));
-  return snap.docs.map((d) => normalizeCampsite(d.id, d.data()));
+  return snap.docs
+    .filter((d) => !ONLY_SHOW_OSM || d.data().dataSource === "osm")
+    .map((d) => normalizeCampsite(d.id, d.data()));
 }
 
 export async function fetchCampsiteBySlug(slug: string): Promise<Campsite | null> {
