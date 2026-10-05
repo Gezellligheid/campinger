@@ -264,8 +264,17 @@ export default function MapView({
         return; // source/tiles not ready yet for this frame
       }
 
+      // Each unclustered point gets a real DOM element (MapLibre's own
+      // cluster circles are WebGL and scale fine — this custom price-pill
+      // marker doesn't). clusterRadius/clusterMaxZoom keep this small in
+      // the common case, but a dense, barely-zoomed-in view can still put
+      // hundreds of points on screen at once — cap it rather than let the
+      // DOM choke, same tradeoff as MAX_RESULTS in fetchCampsitesInBounds.
+      const MAX_DOM_MARKERS = 300;
+
       const visibleIds = new Set<string>();
       for (const feature of features) {
+        if (visibleIds.size >= MAX_DOM_MARKERS) break;
         if (feature.properties?.cluster) continue;
         const id = feature.properties?.id as string | undefined;
         if (!id || visibleIds.has(id)) continue;

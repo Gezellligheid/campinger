@@ -1,19 +1,30 @@
 import * as cheerio from "cheerio";
 import { politeFetch, RobotsDisallowedError } from "./politeFetch";
 
-const JUNK_PATTERN = /logo|icon|sprite|favicon|pixel|spacer|placeholder|avatar/i;
-const MIN_DIMENSION = 100;
+// Broad on purpose: a missed icon costs nothing (we just skip to the next
+// candidate), a missed photo costs a campsite showing a social/payment icon
+// as its hero image — err toward excluding when unsure.
+const JUNK_PATTERN =
+  /logo|icon|sprite|favicon|pixel|spacer|placeholder|avatar|badge|button|arrow|chevron|star-|rating|banner|cookie|gdpr|menu|hamburger|search|cart|loading|spinner|marker|map-pin|social|share|facebook|instagram|twitter|youtube|linkedin|pinterest|whatsapp|tripadvisor|payment|visa|mastercard|paypal|flag-|lang-|svgrepo|flaticon|fontawesome|feathericon/i;
+const MIN_DIMENSION = 200;
 
-function isLikelyJunk(src: string, width?: string, height?: string): boolean {
+function isLikelyJunk(src: string, attrs: { width?: string; height?: string; class?: string; alt?: string }): boolean {
   const lower = src.toLowerCase();
   if (lower.startsWith("data:")) return true;
   if (lower.endsWith(".svg")) return true;
   if (JUNK_PATTERN.test(lower)) return true;
-  const w = Number(width);
-  const h = Number(height);
-  if ((Number.isFinite(w) && w > 0 && w < MIN_DIMENSION) || (Number.isFinite(h) && h > 0 && h < MIN_DIMENSION)) {
-    return true;
-  }
+  if (attrs.class && JUNK_PATTERN.test(attrs.class)) return true;
+  if (attrs.alt && JUNK_PATTERN.test(attrs.alt)) return true;
+
+  const w = Number(attrs.width);
+  const h = Number(attrs.height);
+  const wOk = Number.isFinite(w) && w > 0;
+  const hOk = Number.isFinite(h) && h > 0;
+  if ((wOk && w < MIN_DIMENSION) || (hOk && h < MIN_DIMENSION)) return true;
+  // Icons are almost always square; real photos rarely are — a small-ish
+  // exact square is a strong icon signal even under MIN_DIMENSION alone.
+  if (wOk && hOk && w === h && w <= 300) return true;
+
   return false;
 }
 
@@ -47,11 +58,23 @@ export async function fetchPreviewImages(pageUrl: string, max = 3): Promise<stri
     if (content) candidates.push(content);
   });
 
-  $("img").each((_, el) => {
-    const src = $(el).attr("src") ?? $(el).attr("data-src");
-    if (!src || isLikelyJunk(src, $(el).attr("width"), $(el).attr("height"))) return;
-    candidates.push(src);
-  });
+  // og:image/twitter:image are site-curated and far more reliable than
+  // guessing from arbitrary <img> tags — only fall back to scanning the
+  // page when those didn't already fill the quota.
+  if (candidates.length < max) {
+    $("img").each((_, el) => {
+      const src = $(el).attr("src") ?? $(el).attr("data-src");
+      if (!src) return;
+      const attrs = {
+        width: $(el).attr("width"),
+        height: $(el).attr("height"),
+        class: $(el).attr("class"),
+        alt: $(el).attr("alt"),
+      };
+      if (isLikelyJunk(src, attrs)) return;
+      candidates.push(src);
+    });
+  }
 
   const resolved = candidates
     .map((src) => {
