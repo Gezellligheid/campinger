@@ -97,23 +97,29 @@ export const sources: SourceConfig[] = [
  * request/acceptance of that risk (chat, 2026-09-30); get an actual legal
  * review before scaling focus beyond a small initial country list.
  */
-export const sitemapIndexSources: SitemapIndexSource[] = [
-  {
-    id: "eurocampings-campsite-sitemap",
-    label: "Eurocampings — full campsite sitemap",
-    url: "https://www.eurocampings.co.uk/sitemap/campsite.nl.xml",
-    parser: "eurocampings",
-    complianceNote:
-      "robots.txt (eurocampings.nl and eurocampings.co.uk, checked " +
-      "2026-09-30) disallows only /maintenance.html, /cpc/out/, " +
-      "/campsite/search/, /campsite/review/, /dfp/, " +
-      "/campsite/download-pdf/, /esi/, /index.php/, /clear-cache/ for " +
-      "User-agent: * on both — /sitemap/ isn't covered. Indexing only " +
-      "reads this one sitemap file; it doesn't visit any campsite page " +
-      "itself (each one discovered still goes through politeFetch's own " +
-      "robots.txt check when/if a focused-country run actually visits it).",
-  },
-];
+// Disabled 2026-10-05: trying OpenStreetMap (scraper/lib/osm.ts,
+// osmCountries below) as a lower-risk alternative — the database-right
+// question flagged in the comment above was never actually resolved with a
+// real legal opinion, and OSM sidesteps it entirely (ODbL, meant for
+// exactly this kind of reuse). Entry kept here, commented out, in case
+// eurocampings scraping needs to resume:
+//
+// {
+//   id: "eurocampings-campsite-sitemap",
+//   label: "Eurocampings — full campsite sitemap",
+//   url: "https://www.eurocampings.co.uk/sitemap/campsite.nl.xml",
+//   parser: "eurocampings",
+//   complianceNote:
+//     "robots.txt (eurocampings.nl and eurocampings.co.uk, checked " +
+//     "2026-09-30) disallows only /maintenance.html, /cpc/out/, " +
+//     "/campsite/search/, /campsite/review/, /dfp/, " +
+//     "/campsite/download-pdf/, /esi/, /index.php/, /clear-cache/ for " +
+//     "User-agent: * on both — /sitemap/ isn't covered. Indexing only " +
+//     "reads this one sitemap file; it doesn't visit any campsite page " +
+//     "itself (each one discovered still goes through politeFetch's own " +
+//     "robots.txt check when/if a focused-country run actually visits it).",
+// },
+export const sitemapIndexSources: SitemapIndexSource[] = [];
 
 /**
  * Countries actively being built out — each run, pulls up to `maxItems`
@@ -121,14 +127,16 @@ export const sitemapIndexSources: SitemapIndexSource[] = [
  * them via the same jsonld single-page path every other source uses.
  * `country` must match the path segment parseEurocampingsEntry extracts
  * (e.g. "belgie", not "belgium" or "Belgium").
+ *
+ * Disabled 2026-10-05 along with sitemapIndexSources above — see that
+ * comment. With sitemapIndexSources empty, campsite_index stops getting new
+ * entries, but getFocusedCountryUrls would still drain whatever's already
+ * indexed from before if this stayed populated, so it's emptied too:
+ *
+ * { country: "belgie", label: "Belgium", maxItems: 100 },
+ * { country: "frankrijk", label: "France", maxItems: 100 },
  */
-export const focusedCountries: FocusedCountry[] = [
-  { country: "belgie", label: "Belgium", maxItems: 100 },
-  // France is the largest country in the sitemap (~2,865 entries) — even
-  // at 100/run it'll take a while to fully cover, but that's the
-  // intentional politeness tradeoff (see the file-header note above).
-  { country: "frankrijk", label: "France", maxItems: 100 },
-];
+export const focusedCountries: FocusedCountry[] = [];
 
 /**
  * Countries to pull OpenStreetMap campsite data for (scraper/lib/osm.ts) —
