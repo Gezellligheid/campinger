@@ -3,7 +3,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  limit,
   query,
   where,
   type DocumentData,
@@ -72,21 +71,21 @@ export interface LatLngBounds {
  * that already-small result. A viewport spanning the full lat range of a
  * continent still over-fetches somewhat, but it's nowhere near "every
  * campsite on the site" — see fetchCampsites() below for why that mattered.
+ *
+ * Deliberately no `limit()` here: a range query with no explicit `orderBy`
+ * is implicitly sorted by the range field (lat) ascending, so a limit
+ * applied before the longitude filter keeps only the lowest-latitude
+ * matches across the *entire* band (every longitude, not just this
+ * viewport's) — tried once, it visibly cut off everything but a sliver
+ * along the south edge of the map once the catalog grew past a few
+ * thousand campsites. If read volume needs bounding again, do it after
+ * the longitude filter, not as a query-level limit.
  */
-// Caps the read, and just as importantly the amount of data the map has to
-// render — thousands of full campsite docs (each with a gallery array etc.)
-// in one query was the main source of the lag once OSM added ~10,000
-// campsites to the catalog, on top of overwhelming MapView's per-point DOM
-// markers. A capped, zoomed-out view is a nudge to zoom in, same spirit as
-// the existing "no campsites in this area, pan or zoom out" empty state.
-const MAX_RESULTS = 500;
-
 export async function fetchCampsitesInBounds(bounds: LatLngBounds): Promise<Campsite[]> {
   const q = query(
     collection(db, COLLECTION),
     where("lat", ">=", bounds.south),
     where("lat", "<=", bounds.north),
-    limit(MAX_RESULTS),
   );
   const snap = await getDocs(q);
   return snap.docs
