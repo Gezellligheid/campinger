@@ -29,6 +29,13 @@ type SortKey = "price-asc" | "rating-desc" | "popularity-desc";
 // from loading the whole collection up front.
 const BOUNDS_FETCH_DEBOUNCE_MS = 400;
 
+// Unlike the map (which folds nearby points into a cluster bubble), the
+// list renders one full card — image, text, badges — per campsite with no
+// visual aggregation. With ~10,000 campsites now in the catalog, a
+// zoomed-out viewport can match thousands at once; rendering all of them
+// was the main remaining source of lag after MapView's DOM-marker cap.
+const MAX_VISIBLE_CARDS = 60;
+
 export default function SearchResults({
   location,
   collection,
@@ -237,16 +244,24 @@ export default function SearchResults({
               </p>
             </div>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
-              {filtered.map((c) => (
-                <CampsiteCard
-                  key={c.id}
-                  campsite={c}
-                  active={hoveredId === c.id}
-                  onHover={setHoveredId}
-                />
-              ))}
-            </div>
+            <>
+              {filtered.length > MAX_VISIBLE_CARDS && (
+                <p className="mb-3 text-sm text-ink-500">
+                  Showing {MAX_VISIBLE_CARDS} of {filtered.length} campsites — zoom in to narrow
+                  this down.
+                </p>
+              )}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+                {filtered.slice(0, MAX_VISIBLE_CARDS).map((c) => (
+                  <CampsiteCard
+                    key={c.id}
+                    campsite={c}
+                    active={hoveredId === c.id}
+                    onHover={setHoveredId}
+                  />
+                ))}
+              </div>
+            </>
           )}
         </div>
 
