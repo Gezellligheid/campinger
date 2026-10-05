@@ -43,11 +43,22 @@ export async function writeRecordsToFirestore(records: ScrapedCampsite[]): Promi
 
   for (const record of records) {
     const { priceSnapshots, ...campsiteFields } = record;
+    // A blank heroImage/gallery on this record might just mean this run
+    // didn't attempt to find one (e.g. OSM's per-run image-fetch budget —
+    // see runOsmCountries in run.ts), not that there isn't one. A `merge:
+    // true` write still overwrites a field if it's present with any value,
+    // including null/[], so a previously-found image would get silently
+    // wiped on a run that didn't re-fetch it. Omit the keys instead of
+    // writing a blank, so merge leaves whatever was already there alone.
+    const fields: Record<string, unknown> = { ...campsiteFields };
+    if (!fields.heroImage) delete fields.heroImage;
+    if (Array.isArray(fields.gallery) && fields.gallery.length === 0) delete fields.gallery;
+
     const campsiteRef = db.collection("campsites").doc(record.slug);
     // campsiteFields already carries `lastScrapedAt` — see the field-name
     // note on ScrapedCampsite in scraper/types.ts. Don't add a second
     // "when was this written" field under a different name.
-    batch.set(campsiteRef, campsiteFields, { merge: true });
+    batch.set(campsiteRef, fields, { merge: true });
     opsInBatch++;
     await flushIfNeeded();
 

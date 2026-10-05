@@ -142,6 +142,20 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
   return records;
 }
 
+// Cap on how many campsites get an image-fetch attempt per run, across all
+// OSM countries combined — Belgium alone had 380 website-having candidates
+// (more than this whole budget), and France has far more still, so without
+// a shared cap one country would absorb the entire budget and leave the
+// other with zero progress.
+const MAX_IMAGE_FETCHES_PER_RUN = 200;
+
+function shuffleInPlace<T>(arr: T[]): void {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+}
+
 /**
  * One Overpass query per configured country, normalized straight to full
  * records — no index/focus staging needed (see OsmCountry's doc comment).
@@ -157,46 +171,53 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
     try {
       const elements = await fetchOsmCampsites(countryCode);
       let skipped = 0;
-      let withImages = 0;
       for (const element of elements) {
         const record = normalizeOsmElement(element, label);
         if (!record || record.lat === null || record.lng === null) {
           skipped++;
           continue;
         }
-
-        // Only campsites with a real website (not the OSM fallback link
-        // normalizeOsmElement sets bookingUrl to) are worth fetching — OSM
-        // itself has no campsite photos. Best-effort: a site that's slow,
-        // disallows crawling, or errors just leaves this record photo-less
-        // rather than failing the whole run.
-        if (record.bookingUrl !== record.sourceUrl) {
-          try {
-            const images = await fetchPreviewImages(record.bookingUrl);
-            if (images.length > 0) {
-              record.heroImage = images[0];
-              record.gallery = images;
-              withImages++;
-            }
-          } catch (err) {
-            console.warn(
-              `  [osm:${countryCode}] image fetch failed for ${record.bookingUrl}: ` +
-                `${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-
         records.push(record);
       }
       console.log(
         `  [osm:${countryCode}] ${elements.length} element(s) from Overpass, ` +
-          `${elements.length - skipped} usable record(s), ${skipped} skipped (no name/coords), ` +
-          `${withImages} with photos found`,
+          `${elements.length - skipped} usable record(s), ${skipped} skipped (no name/coords)`,
       );
     } catch (err) {
       console.warn(`  [osm:${countryCode}] ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+
+  // Only campsites with a real website (not the OSM fallback link
+  // normalizeOsmElement sets bookingUrl to) are worth fetching — OSM itself
+  // has no campsite photos. Shuffled before capping so repeated runs cover
+  // different campsites over time (and both countries, not just whichever
+  // was queried first) instead of retrying the same first N forever.
+  const withWebsite = records.filter((r) => r.bookingUrl !== r.sourceUrl);
+  shuffleInPlace(withWebsite);
+  const toFetch = withWebsite.slice(0, MAX_IMAGE_FETCHES_PER_RUN);
+
+  console.log(
+    `  [osm] fetching preview images for ${toFetch.length}/${withWebsite.length} ` +
+      `website-having campsite(s) this run...`,
+  );
+  let withImages = 0;
+  for (const record of toFetch) {
+    try {
+      const images = await fetchPreviewImages(record.bookingUrl);
+      if (images.length > 0) {
+        record.heroImage = images[0];
+        record.gallery = images;
+        withImages++;
+      }
+    } catch (err) {
+      console.warn(
+        `  [osm] image fetch failed for ${record.bookingUrl}: ` +
+          `${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  console.log(`  [osm] ${withImages}/${toFetch.length} campsite(s) got photos this run`);
 
   return records;
 }
