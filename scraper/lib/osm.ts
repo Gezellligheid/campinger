@@ -21,7 +21,15 @@ import { USER_AGENT } from "./politeFetch";
  * base tiles, which covers this too since it's the same source.
  */
 
-const OVERPASS_URL = "https://overpass-api.de/api/interpreter";
+// The shared public Overpass instance intermittently 504s under load,
+// sometimes for a sustained stretch (observed: two straight failures a few
+// minutes apart, even with a retry each time) — rotate through a couple of
+// public mirrors rather than hammering just the one that's currently
+// struggling.
+const OVERPASS_URLS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+];
 
 interface OverpassElement {
   type: "node" | "way" | "relation";
@@ -43,12 +51,8 @@ interface OverpassResponse {
  * representative point (their bounding-geometry centroid) alongside plain
  * node coordinates, so every element type yields one lat/lng pair.
  */
-// The shared public Overpass instance intermittently 504s under load
-// (observed in testing) with no fault of the query itself — one retry
-// after a short pause clears it in practice, and this runs unattended in
-// CI so it shouldn't give up on the first transient blip.
-async function fetchOverpass(query: string, attempt = 1): Promise<Response> {
-  const res = await fetch(OVERPASS_URL, {
+async function postOverpass(url: string, query: string): Promise<Response> {
+  return fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "text/plain",
@@ -56,16 +60,34 @@ async function fetchOverpass(query: string, attempt = 1): Promise<Response> {
     },
     body: query,
   });
-  if (!res.ok && attempt === 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    return fetchOverpass(query, attempt + 1);
+}
+
+// Try each mirror in turn, with one retry (after a pause) on each before
+// moving to the next — up to 2 mirrors x 2 attempts = 4 tries total. A
+// single mirror can be down or overloaded for a sustained stretch (observed
+// in practice: two straight failures, minutes apart), so falling through to
+// a different host is the real fix, not just waiting longer on one.
+async function fetchOverpass(query: string): Promise<Response> {
+  let lastRes: Response | null = null;
+  for (const url of OVERPASS_URLS) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const res = await postOverpass(url, query);
+      if (res.ok) return res;
+      lastRes = res;
+      if (attempt === 1) await new Promise((resolve) => setTimeout(resolve, 8000));
+    }
   }
-  return res;
+  return lastRes!;
 }
 
 export async function fetchOsmCampsites(countryCode: string): Promise<OverpassElement[]> {
+  // 180s, not 60s: Belgium (553 elements) finished in ~35s, but France —
+  // a much larger country, more elements, and `out center tags` has to
+  // compute a centroid for every way/relation — consistently failed even
+  // after mirror fallback, which points at the query genuinely needing
+  // more than 60s server-side, not just transient server load.
   const query = `
-    [out:json][timeout:60];
+    [out:json][timeout:180];
     area["ISO3166-1"="${countryCode}"][admin_level=2]->.searchArea;
     (
       node["tourism"="camp_site"](area.searchArea);
