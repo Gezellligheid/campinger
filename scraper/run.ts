@@ -195,14 +195,29 @@ function installFetchCrashGuard(): () => void {
   };
 }
 
+// How many successfully-image-updated records to accumulate before flushing
+// to Firestore during the (slow, hours-long) image-fetch phase — bounds how
+// much of that phase's progress a mid-run failure could lose to this many
+// campsites' worth, not the whole batch.
+const IMAGE_FLUSH_BATCH_SIZE = 50;
+
 /**
  * One Overpass query per configured country, normalized straight to full
  * records — no index/focus staging needed (see OsmCountry's doc comment).
- * Doesn't touch Firestore at all; just returns records for run() to write
- * alongside everything else. A failure for one country (e.g. Overpass
- * timeout) is logged and skipped rather than aborting the whole run.
+ *
+ * Persists incrementally via `persistBatch` rather than only returning
+ * records for run() to write once at the very end: the base catalog (no
+ * images yet) is persisted as soon as it's built, and image-fetch updates
+ * are flushed every IMAGE_FLUSH_BATCH_SIZE successes. That phase alone can
+ * run for hours (see MAX_IMAGE_FETCHES_PER_RUN's comment) — without this, a
+ * mid-run failure (quota, crash, killed job, network outage) would lose
+ * everything back to the start of the run, not just whatever was in
+ * flight. A failure for one country's Overpass query is logged and skipped
+ * rather than aborting the whole run.
  */
-async function runOsmCountries(): Promise<ScrapedCampsite[]> {
+async function runOsmCountries(
+  persistBatch: (records: ScrapedCampsite[]) => Promise<void>,
+): Promise<ScrapedCampsite[]> {
   const records: ScrapedCampsite[] = [];
 
   for (const { countryCode, label } of osmCountries) {
@@ -227,6 +242,10 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
     }
   }
 
+  console.log(`  [osm] persisting base catalog (${records.length} campsite(s))...`);
+  await persistBatch(records);
+  console.log(`  [osm] base catalog persisted`);
+
   // Only campsites with a real website (not the OSM fallback link
   // normalizeOsmElement sets bookingUrl to) are worth fetching — OSM itself
   // has no campsite photos. Shuffled before capping so repeated runs cover
@@ -241,6 +260,7 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
       `website-having campsite(s) this run...`,
   );
   let withImages = 0;
+  let pending: ScrapedCampsite[] = [];
   const uninstallCrashGuard = installFetchCrashGuard();
   try {
     for (const record of toFetch) {
@@ -260,6 +280,7 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
           record.heroImage = images[0];
           record.gallery = images;
           withImages++;
+          pending.push(record);
         }
       } catch (err) {
         console.warn(
@@ -267,6 +288,16 @@ async function runOsmCountries(): Promise<ScrapedCampsite[]> {
             `${err instanceof Error ? err.message : String(err)}`,
         );
       }
+
+      if (pending.length >= IMAGE_FLUSH_BATCH_SIZE) {
+        await persistBatch(pending);
+        console.log(`  [osm] flushed ${pending.length} image update(s) (${withImages}/${toFetch.length} so far)`);
+        pending = [];
+      }
+    }
+    if (pending.length > 0) {
+      await persistBatch(pending);
+      console.log(`  [osm] flushed final ${pending.length} image update(s)`);
     }
   } finally {
     uninstallCrashGuard();
@@ -315,7 +346,11 @@ async function run(): Promise<void> {
   const focusedRecords = await runFocusedCountries();
 
   console.log("Fetching OpenStreetMap campsites...");
-  const osmRecords = await runOsmCountries();
+  const osmRecords = await runOsmCountries(async (batch) => {
+    if (batch.length > 0 && hasFirestoreCredentials()) {
+      await writeRecordsToFirestore(batch);
+    }
+  });
 
   const allRecords: ScrapedCampsite[] = [
     ...results.flatMap((r) => r.records),
@@ -347,8 +382,12 @@ async function run(): Promise<void> {
   );
 
   if (hasFirestoreCredentials()) {
-    console.log("FIREBASE_SERVICE_ACCOUNT_KEY set — writing to Firestore...");
-    await writeRecordsToFirestore(allRecords);
+    // OSM records were already persisted incrementally inside
+    // runOsmCountries (base catalog + periodic image-update flushes) — only
+    // the other sources need writing here. Re-including osmRecords would
+    // just rewrite the same ~9,500 docs a second time for nothing.
+    console.log("FIREBASE_SERVICE_ACCOUNT_KEY set — writing remaining sources to Firestore...");
+    await writeRecordsToFirestore([...results.flatMap((r) => r.records), ...focusedRecords]);
     await writeAdapterHealthToFirestore(results);
     console.log("Firestore write complete.");
   } else {
