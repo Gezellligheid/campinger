@@ -40,13 +40,14 @@ const FETCH_TIMEOUT_MS = 15000;
  * websites per run, not just a handful of manually-reviewed sources — a
  * single slow/hanging one shouldn't stall the whole run.
  */
-export async function politeFetch(url: string): Promise<Response> {
+export async function politeFetch(url: string, init?: RequestInit): Promise<Response> {
   if (!(await isAllowedByRobots(url, USER_AGENT))) {
     throw new RobotsDisallowedError(url);
   }
   await waitForTurn(hostOf(url));
   return fetch(url, {
-    headers: { "User-Agent": USER_AGENT },
+    ...init,
+    headers: { "User-Agent": USER_AGENT, ...(init?.headers as Record<string, string> | undefined) },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
 }
