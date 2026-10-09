@@ -147,7 +147,18 @@ async function runFocusedCountries(): Promise<ScrapedCampsite[]> {
 // (more than this whole budget), and France has far more still, so without
 // a shared cap one country would absorb the entire budget and leave the
 // other with zero progress.
-const MAX_IMAGE_FETCHES_PER_RUN = 200;
+//
+// 1500, not "all ~6,500 at once": each candidate now costs a page fetch
+// *plus* up to a few HEAD requests for size verification (see
+// scraper/lib/images.ts), each rate-limited ~2s/host — realistically
+// several seconds per campsite, so the full pool in one run risks 10+
+// hours of runtime. writeRecordsToFirestore only runs once, at the very
+// end of the whole script, so a run that long risks losing the *entire*
+// scrape (not just images) if it gets killed by GitHub Actions' default
+// 360-minute job timeout (scrape.yml doesn't override it) or anything else
+// goes wrong mid-run. 1500/run keeps a single run comfortably within that
+// default and covers the whole pool in ~4-5 runs instead of ~33.
+const MAX_IMAGE_FETCHES_PER_RUN = 1500;
 
 function shuffleInPlace<T>(arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {

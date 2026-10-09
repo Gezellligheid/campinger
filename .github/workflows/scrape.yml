@@ -15,6 +15,13 @@ on:
 jobs:
   scrape:
     runs-on: self-hosted
+    # Explicit, not relying on the default 360-minute job timeout — OSM's
+    # image-fetch step (scraper/run.ts) can realistically take a few hours
+    # on its own now that each candidate is verified by a HEAD request, and
+    # nothing gets written to Firestore until the very end of the script,
+    # so a silent default timeout killing the job would lose the entire
+    # run, not just the images.
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
 
